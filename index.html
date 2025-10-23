@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Pixel Art Editor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 24px;
+            color: #00d9ff;
+        }
+
+        #canvas {
+            border: 2px solid #0f3460;
+            background: #e8e8e8;
+            display: block;
+            margin: 0 auto 15px;
+            cursor: crosshair;
+            image-rendering: pixelated;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .tool-group {
+            background: #0f3460;
+            padding: 8px;
+            border-radius: 4px;
+            display: flex;
+            gap: 5px;
+        }
+
+        button {
+            background: #533483;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: #7b4fb8;
+        }
+
+        button.active {
+            background: #00d9ff;
+            color: #000;
+            font-weight: bold;
+        }
+
+        .color-palette {
+            display: grid;
+            grid-template-columns: repeat(8, 30px);
+            gap: 4px;
+            background: #0f3460;
+            padding: 8px;
+            border-radius: 4px;
+        }
+
+        .color-btn {
+            width: 30px;
+            height: 30px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: transform 0.1s;
+        }
+
+        .color-btn:hover {
+            transform: scale(1.1);
+        }
+
+        .color-btn.selected {
+            border-color: #00d9ff;
+            box-shadow: 0 0 8px #00d9ff;
+        }
+
+        .info {
+            text-align: center;
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 10px;
+        }
+
+        .shortcuts {
+            margin-top: 15px;
+            padding: 10px;
+            background: #0f3460;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .shortcuts h3 {
+            margin-bottom: 8px;
+            color: #00d9ff;
+            font-size: 13px;
+        }
+
+        .shortcuts ul {
+            list-style: none;
+            columns: 2;
+        }
+
+        .shortcuts li {
+            margin-bottom: 5px;
+        }
+
+        .shortcuts kbd {
+            background: #533483;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Vector Pixel Art Editor</h1>
+
+        <canvas id="canvas" width="480" height="272"></canvas>
+
+        <div class="toolbar">
+            <div class="tool-group">
+                <button id="tool-line" class="tool-btn active" title="Line (1)">Line</button>
+                <button id="tool-rect" class="tool-btn" title="Rectangle (2)">Rect</button>
+                <button id="tool-circle" class="tool-btn" title="Circle (3)">Circle</button>
+                <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval</button>
+                <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Tri</button>
+                <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Poly</button>
+                <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill</button>
+            </div>
+
+            <div class="tool-group">
+                <button id="tool-select" class="tool-btn" title="Select (V)">Select</button>
+            </div>
+
+            <div class="tool-group">
+                <button id="tool-copy" title="Copy (Ctrl+C)">Copy</button>
+                <button id="tool-paste" title="Paste (Ctrl+V)">Paste</button>
+                <button id="tool-delete" title="Delete (Del/Backspace)">Delete</button>
+                <button id="tool-undo" title="Undo (Ctrl+Z)">Undo</button>
+            </div>
+
+            <div class="tool-group">
+                <button id="tool-clear" title="Clear All">Clear</button>
+                <button id="tool-save" title="Save (Ctrl+S)">Save</button>
+                <button id="tool-load" title="Load">Load</button>
+            </div>
+        </div>
+
+        <div class="color-palette" id="colorPalette"></div>
+
+        <div class="toolbar">
+            <div class="tool-group">
+                <label style="color: #00d9ff; margin-right: 10px;">Aspect:</label>
+                <select id="aspect-ratio" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
+                    <option value="1:1">1:1</option>
+                    <option value="4:3">4:3</option>
+                    <option value="3:2">3:2</option>
+                    <option value="16:9">16:9</option>
+                    <option value="2:1">2:1</option>
+                </select>
+            </div>
+            <div class="tool-group">
+                <button id="orientation-landscape" class="orientation-btn active" title="Landscape">Landscape</button>
+                <button id="orientation-portrait" class="orientation-btn" title="Portrait">Portrait</button>
+            </div>
+            <div class="tool-group">
+                <label style="color: #00d9ff; margin-right: 10px;">Grid:</label>
+                <select id="grid-size" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
+                    <option value="0">Off</option>
+                    <option value="4">4</option>
+                    <option value="8">8</option>
+                    <option value="12">12</option>
+                    <option value="16">16</option>
+                    <option value="24">24</option>
+                    <option value="32" selected>32</option>
+                    <option value="48">48</option>
+                    <option value="64">64</option>
+                    <option value="128">128</option>
+                    <option value="256">256</option>
+                    <option value="512">512</option>
+                </select>
+            </div>
+            <div class="tool-group">
+                <button id="toggle-grid" title="Show/Hide Grid (G)">Show Grid</button>
+            </div>
+            <div class="tool-group">
+                <button id="toggle-outline" title="Toggle Outline (O)">Toggle Outline</button>
+            </div>
+            <div class="tool-group">
+                <label style="color: #00d9ff; margin-right: 10px;">Zoom:</label>
+                <button id="zoom-out" title="Zoom Out (-)">-</button>
+                <span id="zoom-level" style="color: #00d9ff; margin: 0 8px; min-width: 40px; display: inline-block; text-align: center;">200%</span>
+                <button id="zoom-in" title="Zoom In (+)">+</button>
+                <button id="zoom-reset" title="Reset Zoom (0)">Reset</button>
+            </div>
+        </div>
+
+        <div class="info">
+            <span id="toolInfo">Tool: Line | Click to place points</span>
+        </div>
+
+        <div class="shortcuts">
+            <h3>Keyboard Shortcuts</h3>
+            <ul>
+                <li><kbd>1-6</kbd> Select drawing tools</li>
+                <li><kbd>V</kbd> Select tool (move/edit)</li>
+                <li><kbd>F</kbd> Fill cell tool</li>
+                <li><kbd>Right-click</kbd> Add/remove nodes (select mode)</li>
+                <li><kbd>Ctrl+C</kbd> Copy selected shape</li>
+                <li><kbd>Ctrl+V</kbd> Paste shape</li>
+                <li><kbd>Del/Backspace</kbd> Delete shape</li>
+                <li><kbd>Ctrl+Z</kbd> Undo last shape</li>
+                <li><kbd>Ctrl+S</kbd> Save to file</li>
+                <li><kbd>H</kbd> Lock horizontal</li>
+                <li><kbd>G</kbd> Toggle grid display</li>
+                <li><kbd>O</kbd> Toggle outline mode</li>
+                <li><kbd>+</kbd> Zoom in</li>
+                <li><kbd>-</kbd> Zoom out</li>
+                <li><kbd>0</kbd> Reset zoom</li>
+                <li><kbd>ESC</kbd> Cancel current operation</li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="editor.js"></script>
+</body>
+</html>
