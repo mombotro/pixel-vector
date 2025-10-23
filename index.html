@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vector Pixel Art Editor</title>
+    <title>Vexel Edit</title>
     <style>
         * {
             margin: 0;
@@ -150,7 +150,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>Vector Pixel Art Editor</h1>
+        <h1>Vexel Edit: Vector-based Pixel Art Editor</h1>
 
         <canvas id="canvas" width="480" height="272"></canvas>
 
@@ -183,6 +183,16 @@
             </div>
 
             <div class="tool-group">
+                <button id="tool-union" title="Union (combine shapes)">Union</button>
+                <button id="tool-subtract" title="Subtract (remove from first)">Subtract</button>
+                <button id="tool-intersect" title="Intersect (keep overlap)">Intersect</button>
+            </div>
+
+            <div class="tool-group">
+                <button id="tool-to-polygon" title="Convert shape to polygon">To Polygon</button>
+            </div>
+
+            <div class="tool-group">
                 <button id="tool-undo" title="Undo (Ctrl+Z)">Undo</button>
             </div>
 
@@ -197,12 +207,17 @@
             <div class="tool-group">
                 <label style="color: #00d9ff; margin-right: 10px;">Palette:</label>
                 <select id="palette-select" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
+                    <option value="16bit" selected>16-Bit Basic</option>
                     <option value="tic80">TIC-80</option>
                     <option value="pico8">Pico-8</option>
                     <option value="gameboy">Game Boy</option>
                     <option value="1bit">1-Bit (B&W)</option>
                     <option value="lospec">Import from Lospec...</option>
                 </select>
+            </div>
+            <div class="tool-group">
+                <label style="color: #00d9ff; margin-right: 10px;">Background:</label>
+                <input type="color" id="bg-color" value="#e8e8e8" style="width: 50px; height: 30px; border: 1px solid #533483; border-radius: 3px; cursor: pointer; background: #0f3460;">
             </div>
         </div>
 

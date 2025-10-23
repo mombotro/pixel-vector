@@ -14,6 +14,12 @@ class VectorEditor {
 
         // Color palettes
         this.palettes = {
+            '16bit': [
+                '#000000', '#ffffff', '#808080', '#c0c0c0',
+                '#ff0000', '#00ff00', '#0000ff', '#ffff00',
+                '#ff00ff', '#00ffff', '#800000', '#008000',
+                '#000080', '#808000', '#800080', '#008080'
+            ],
             'tic80': [
                 '#1a1c2c', '#5d275d', '#b13e53', '#ef7d57',
                 '#ffcd75', '#a7f070', '#38b764', '#257179',
@@ -34,8 +40,8 @@ class VectorEditor {
             ]
         };
 
-        this.currentPalette = 'tic80';
-        this.colors = [...this.palettes['tic80']];
+        this.currentPalette = '16bit';
+        this.colors = [...this.palettes['16bit']];
         this.paletteNames = {}; // Store custom palette names
 
         // State
@@ -54,6 +60,11 @@ class VectorEditor {
         this.lockDirection = null; // 'horizontal', 'vertical', or null
         this.selectionBox = null; // {x1, y1, x2, y2} for drag selection
 
+        // Undo/redo history
+        this.history = [];
+        this.historyIndex = -1;
+        this.maxHistory = 50;
+
         // Grid settings
         this.gridCells = 32; // 0 = off, 8 = 8x8 cells, 16 = 16x16 cells, etc.
         this.showGrid = false;
@@ -64,6 +75,7 @@ class VectorEditor {
         this.baseSize = 240;  // Base size for calculations
         this.canvasWidth = 240;  // Logical canvas width
         this.canvasHeight = 240; // Logical canvas height
+        this.backgroundColor = '#e8e8e8'; // Canvas background color
 
         // Mouse state
         this.mouseX = 0;
@@ -196,6 +208,14 @@ class VectorEditor {
         document.getElementById('tool-bring-forward').addEventListener('click', () => this.bringForward());
         document.getElementById('tool-send-backward').addEventListener('click', () => this.sendBackward());
 
+        // Boolean operation buttons
+        document.getElementById('tool-union').addEventListener('click', () => this.booleanUnion());
+        document.getElementById('tool-subtract').addEventListener('click', () => this.booleanSubtract());
+        document.getElementById('tool-intersect').addEventListener('click', () => this.booleanIntersect());
+
+        // Convert to polygon button
+        document.getElementById('tool-to-polygon').addEventListener('click', () => this.convertToPolygon());
+
         // Grid dropdown
         document.getElementById('grid-size').addEventListener('change', (e) => {
             this.gridCells = parseInt(e.target.value);
@@ -233,6 +253,12 @@ class VectorEditor {
             } else {
                 this.setPalette(paletteId);
             }
+        });
+
+        // Background color picker
+        document.getElementById('bg-color').addEventListener('input', (e) => {
+            this.backgroundColor = e.target.value;
+            this.render();
         });
 
         // Aspect ratio dropdown
@@ -730,7 +756,23 @@ class VectorEditor {
         this.shapes.push(shape);
         this.selectedShape = shape;
         this.currentPoints = [];
+        this.saveHistory();
         this.render();
+    }
+
+    saveHistory() {
+        // Remove any history after current index (for redo)
+        this.history = this.history.slice(0, this.historyIndex + 1);
+
+        // Save current state
+        this.history.push(JSON.parse(JSON.stringify(this.shapes)));
+
+        // Limit history size
+        if (this.history.length > this.maxHistory) {
+            this.history.shift();
+        } else {
+            this.historyIndex++;
+        }
     }
 
 
@@ -915,6 +957,7 @@ class VectorEditor {
             // Select the pasted shapes
             this.selectedShapes = newShapes;
             this.selectedShape = newShapes.length === 1 ? newShapes[0] : null;
+            this.saveHistory();
             this.render();
         }
     }
@@ -931,10 +974,12 @@ class VectorEditor {
             this.selectedShapes = [];
             this.selectedShape = null;
             this.selectedPoint = null;
+            this.saveHistory();
             this.render();
         } else if (this.shapes.length > 0) {
             // Delete last shape if none selected
             this.shapes.pop();
+            this.saveHistory();
             this.render();
         }
     }
@@ -1006,10 +1051,410 @@ class VectorEditor {
         this.render();
     }
 
+    booleanUnion() {
+        if (this.selectedShapes.length < 2) {
+            alert('Select at least 2 shapes to perform union operation');
+            return;
+        }
+
+        // First shape is the base, last clicked shape is added to it
+        const baseShape = this.selectedShapes[0];
+        const addShape = this.selectedShapes[this.selectedShapes.length - 1];
+
+        // Get bounding box of both shapes combined
+        const pixels = this.rasterizeShapesToPixels([baseShape, addShape]);
+
+        // Create new polygon from combined pixels
+        const newShape = this.pixelsToPolygon(pixels, baseShape.color);
+
+        if (newShape) {
+            // Remove both shapes
+            this.selectedShapes.forEach(shape => {
+                const index = this.shapes.indexOf(shape);
+                if (index > -1) this.shapes.splice(index, 1);
+            });
+
+            // Add new combined shape
+            this.shapes.push(newShape);
+            this.selectedShapes = [newShape];
+            this.selectedShape = newShape;
+            this.saveHistory();
+            this.render();
+        }
+    }
+
+    booleanSubtract() {
+        if (this.selectedShapes.length < 2) {
+            alert('Select at least 2 shapes to perform subtract operation');
+            return;
+        }
+
+        // First shape is the base, last clicked shape is removed from it
+        const baseShape = this.selectedShapes[0];
+        const subtractShape = this.selectedShapes[this.selectedShapes.length - 1];
+
+        // Rasterize both shapes
+        const basePixels = this.rasterizeShapesToPixels([baseShape]);
+        const subtractPixels = this.rasterizeShapesToPixels([subtractShape]);
+
+        // Remove subtract pixels from base
+        subtractPixels.forEach(key => basePixels.delete(key));
+
+        // Create new polygon from result
+        const newShape = this.pixelsToPolygon(basePixels, baseShape.color);
+
+        if (newShape) {
+            // Remove both shapes
+            this.selectedShapes.forEach(shape => {
+                const index = this.shapes.indexOf(shape);
+                if (index > -1) this.shapes.splice(index, 1);
+            });
+
+            // Add new shape
+            this.shapes.push(newShape);
+            this.selectedShapes = [newShape];
+            this.selectedShape = newShape;
+            this.saveHistory();
+            this.render();
+        }
+    }
+
+    booleanIntersect() {
+        if (this.selectedShapes.length < 2) {
+            alert('Select at least 2 shapes to perform intersect operation');
+            return;
+        }
+
+        // Keep only pixels that exist in both shapes
+        const baseShape = this.selectedShapes[0];
+        const intersectShape = this.selectedShapes[this.selectedShapes.length - 1];
+
+        const basePixels = this.rasterizeShapesToPixels([baseShape]);
+        const intersectPixels = this.rasterizeShapesToPixels([intersectShape]);
+
+        // Keep only common pixels
+        const result = new Set();
+        basePixels.forEach(key => {
+            if (intersectPixels.has(key)) result.add(key);
+        });
+
+        // Create new polygon from result
+        const newShape = this.pixelsToPolygon(result, baseShape.color);
+
+        if (newShape) {
+            // Remove both shapes
+            this.selectedShapes.forEach(shape => {
+                const index = this.shapes.indexOf(shape);
+                if (index > -1) this.shapes.splice(index, 1);
+            });
+
+            // Add new shape
+            this.shapes.push(newShape);
+            this.selectedShapes = [newShape];
+            this.selectedShape = newShape;
+            this.saveHistory();
+            this.render();
+        }
+    }
+
+    convertToPolygon() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one shape to convert to polygon');
+            return;
+        }
+
+        const convertedShapes = [];
+
+        this.selectedShapes.forEach(shape => {
+            if (shape.type === 'polygon') {
+                // Already a polygon, keep as is
+                convertedShapes.push(shape);
+                return;
+            }
+
+            // Rasterize the shape and convert to polygon
+            const pixels = this.rasterizeShapesToPixels([shape]);
+            const newShape = this.pixelsToPolygon(pixels, shape.color);
+
+            if (newShape) {
+                // Preserve outline property
+                newShape.outline = shape.outline;
+                convertedShapes.push(newShape);
+
+                // Remove original shape
+                const index = this.shapes.indexOf(shape);
+                if (index > -1) {
+                    this.shapes.splice(index, 1);
+                }
+            }
+        });
+
+        // Add converted shapes
+        convertedShapes.forEach(shape => this.shapes.push(shape));
+
+        // Update selection
+        this.selectedShapes = convertedShapes;
+        this.selectedShape = convertedShapes.length === 1 ? convertedShapes[0] : null;
+        this.saveHistory();
+        this.render();
+    }
+
+    rasterizeShapesToPixels(shapes) {
+        const pixels = new Set();
+
+        shapes.forEach(shape => {
+            // Temporarily create a test canvas to rasterize the shape
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = this.canvasWidth;
+            tempCanvas.height = this.canvasHeight;
+            const tempCtx = tempCanvas.getContext('2d');
+
+            // Save current context and swap
+            const origCtx = this.ctx;
+            const origScale = this.scale;
+            this.ctx = tempCtx;
+            this.scale = 1;
+
+            // Force shape to be filled (not outline) for boolean operations
+            const originalOutline = shape.outline;
+            shape.outline = false;
+
+            // Draw the shape
+            this.drawShape(shape, false);
+
+            // Restore outline property
+            shape.outline = originalOutline;
+
+            // Get pixel data
+            const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+            for (let y = 0; y < tempCanvas.height; y++) {
+                for (let x = 0; x < tempCanvas.width; x++) {
+                    const i = (y * tempCanvas.width + x) * 4;
+                    const alpha = imageData.data[i + 3];
+                    if (alpha > 0) {
+                        pixels.add(`${x},${y}`);
+                    }
+                }
+            }
+
+            // Restore context
+            this.ctx = origCtx;
+            this.scale = origScale;
+        });
+
+        return pixels;
+    }
+
+    pixelsToPolygon(pixels, color) {
+        if (pixels.size === 0) return null;
+
+        // Find bounding box
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+
+        pixels.forEach(key => {
+            const [x, y] = key.split(',').map(Number);
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+        });
+
+        // Create a grid for marching squares
+        const grid = [];
+        for (let y = minY - 1; y <= maxY + 1; y++) {
+            const row = [];
+            for (let x = minX - 1; x <= maxX + 1; x++) {
+                row.push(pixels.has(`${x},${y}`) ? 1 : 0);
+            }
+            grid.push(row);
+        }
+
+        // Use marching squares to trace the outline
+        const outlinePoints = this.marchingSquares(grid, minX - 1, minY - 1);
+
+        if (outlinePoints.length < 3) return null;
+
+        return {
+            type: 'polygon',
+            points: outlinePoints,
+            color: color,
+            lineWidth: 1,
+            outline: false
+        };
+    }
+
+    marchingSquares(grid, offsetX, offsetY) {
+        const height = grid.length;
+        const width = grid[0].length;
+
+        // Find all contour edges by looking for pixels next to empty space
+        const edgePixels = [];
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                if (grid[y][x] === 1) {
+                    // Check if this pixel is on the edge (has at least one empty neighbor)
+                    const hasEmptyNeighbor =
+                        (x === 0 || grid[y][x-1] === 0) ||
+                        (x === width-1 || grid[y][x+1] === 0) ||
+                        (y === 0 || grid[y-1][x] === 0) ||
+                        (y === height-1 || grid[y+1][x] === 0);
+
+                    if (hasEmptyNeighbor) {
+                        edgePixels.push({ x: offsetX + x, y: offsetY + y });
+                    }
+                }
+            }
+        }
+
+        if (edgePixels.length === 0) return [];
+
+        // Find the topmost-leftmost point to start
+        edgePixels.sort((a, b) => {
+            if (a.y !== b.y) return a.y - b.y;
+            return a.x - b.x;
+        });
+
+        // Trace the contour by connecting nearest neighbors
+        const contour = [edgePixels[0]];
+        const used = new Set([0]);
+
+        while (contour.length < edgePixels.length && contour.length < 500) {
+            const current = contour[contour.length - 1];
+            let nearestIdx = -1;
+            let nearestDist = Infinity;
+
+            // Find nearest unused edge pixel (prefer adjacent pixels)
+            for (let i = 0; i < edgePixels.length; i++) {
+                if (used.has(i)) continue;
+
+                const p = edgePixels[i];
+                const dx = p.x - current.x;
+                const dy = p.y - current.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // Only connect to adjacent or very close pixels
+                if (dist <= 1.5 && dist < nearestDist) {
+                    nearestDist = dist;
+                    nearestIdx = i;
+                }
+            }
+
+            if (nearestIdx === -1) break;
+
+            contour.push(edgePixels[nearestIdx]);
+            used.add(nearestIdx);
+        }
+
+        // Simplify the contour
+        return this.simplifyPolygon(contour, 0.5);
+    }
+
+    simplifyPolygon(points, tolerance) {
+        if (points.length < 3) return points;
+
+        // Remove consecutive duplicate points first
+        const unique = [points[0]];
+        for (let i = 1; i < points.length; i++) {
+            const prev = unique[unique.length - 1];
+            const curr = points[i];
+            if (curr.x !== prev.x || curr.y !== prev.y) {
+                unique.push(curr);
+            }
+        }
+
+        if (unique.length < 3) return unique;
+
+        // Ramer-Douglas-Peucker algorithm for aggressive simplification
+        const simplified = this.douglasPeucker(unique, tolerance);
+
+        // Further simplify by removing points that are nearly collinear
+        const final = [simplified[0]];
+        for (let i = 1; i < simplified.length - 1; i++) {
+            const prev = final[final.length - 1];
+            const curr = simplified[i];
+            const next = simplified[i + 1];
+
+            // Check if curr is roughly on the line between prev and next
+            const dx1 = curr.x - prev.x;
+            const dy1 = curr.y - prev.y;
+            const dx2 = next.x - curr.x;
+            const dy2 = next.y - curr.y;
+
+            // Cross product to check collinearity
+            const cross = Math.abs(dx1 * dy2 - dy1 * dx2);
+
+            if (cross > 0.5) { // Not collinear, keep the point
+                final.push(curr);
+            }
+        }
+        final.push(simplified[simplified.length - 1]);
+
+        return final.length >= 3 ? final : simplified;
+    }
+
+    douglasPeucker(points, tolerance) {
+        if (points.length < 3) return points;
+
+        // Find the point with maximum distance from the line between first and last
+        let maxDist = 0;
+        let maxIndex = 0;
+        const first = points[0];
+        const last = points[points.length - 1];
+
+        for (let i = 1; i < points.length - 1; i++) {
+            const dist = this.perpendicularDistance(points[i], first, last);
+            if (dist > maxDist) {
+                maxDist = dist;
+                maxIndex = i;
+            }
+        }
+
+        // If max distance is greater than tolerance, recursively simplify
+        if (maxDist > tolerance) {
+            const left = this.douglasPeucker(points.slice(0, maxIndex + 1), tolerance);
+            const right = this.douglasPeucker(points.slice(maxIndex), tolerance);
+            return left.slice(0, -1).concat(right);
+        } else {
+            return [first, last];
+        }
+    }
+
+    perpendicularDistance(point, lineStart, lineEnd) {
+        const dx = lineEnd.x - lineStart.x;
+        const dy = lineEnd.y - lineStart.y;
+
+        if (dx === 0 && dy === 0) {
+            return Math.sqrt((point.x - lineStart.x) ** 2 + (point.y - lineStart.y) ** 2);
+        }
+
+        const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (dx * dx + dy * dy);
+        const clampedT = Math.max(0, Math.min(1, t));
+
+        const projX = lineStart.x + clampedT * dx;
+        const projY = lineStart.y + clampedT * dy;
+
+        return Math.sqrt((point.x - projX) ** 2 + (point.y - projY) ** 2);
+    }
+
     undo() {
-        if (this.shapes.length > 0) {
-            this.shapes.pop();
+        if (this.historyIndex > 0) {
+            this.historyIndex--;
+            this.shapes = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
             this.selectedShape = null;
+            this.selectedShapes = [];
+            this.selectedPoint = null;
+            this.render();
+        }
+    }
+
+    redo() {
+        if (this.historyIndex < this.history.length - 1) {
+            this.historyIndex++;
+            this.shapes = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+            this.selectedShape = null;
+            this.selectedShapes = [];
             this.selectedPoint = null;
             this.render();
         }
@@ -1021,6 +1466,7 @@ class VectorEditor {
             this.currentPoints = [];
             this.selectedShape = null;
             this.selectedPoint = null;
+            this.saveHistory();
             this.render();
         }
     }
@@ -1029,6 +1475,7 @@ class VectorEditor {
         const data = {
             canvasWidth: this.canvasWidth,
             canvasHeight: this.canvasHeight,
+            backgroundColor: this.backgroundColor,
             shapes: this.shapes
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1064,6 +1511,10 @@ class VectorEditor {
                                 this.canvasHeight = data.canvasHeight;
                                 this.canvas.width = this.canvasWidth * this.scale;
                                 this.canvas.height = this.canvasHeight * this.scale;
+                            }
+                            if (data.backgroundColor) {
+                                this.backgroundColor = data.backgroundColor;
+                                document.getElementById('bg-color').value = this.backgroundColor;
                             }
                         }
 
@@ -1188,8 +1639,8 @@ class VectorEditor {
     }
 
     render() {
-        // Clear canvas
-        this.ctx.fillStyle = '#e8e8e8';
+        // Clear canvas with background color
+        this.ctx.fillStyle = this.backgroundColor;
         this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
         // Draw grid if enabled
