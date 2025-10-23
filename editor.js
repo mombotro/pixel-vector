@@ -36,6 +36,7 @@ class VectorEditor {
 
         this.currentPalette = 'tic80';
         this.colors = [...this.palettes['tic80']];
+        this.paletteNames = {}; // Store custom palette names
 
         // State
         this.currentColor = 0;
@@ -134,8 +135,22 @@ class VectorEditor {
             // Add to palettes
             const paletteName = `lospec_${slug}`;
             this.palettes[paletteName] = colors;
+            this.paletteNames[paletteName] = data.name;
             this.currentPalette = paletteName;
             this.colors = [...colors];
+
+            // Add option to dropdown if it doesn't exist
+            const select = document.getElementById('palette-select');
+            let option = select.querySelector(`option[value="${paletteName}"]`);
+            if (!option) {
+                option = document.createElement('option');
+                option.value = paletteName;
+                option.textContent = data.name;
+                // Insert before "Import from Lospec..." option
+                const lospecOption = select.querySelector('option[value="lospec"]');
+                select.insertBefore(option, lospecOption);
+            }
+            select.value = paletteName;
 
             // Reset color selection if needed
             if (this.currentColor >= this.colors.length) {
@@ -174,6 +189,12 @@ class VectorEditor {
         document.getElementById('tool-clear').addEventListener('click', () => this.clear());
         document.getElementById('tool-save').addEventListener('click', () => this.save());
         document.getElementById('tool-load').addEventListener('click', () => this.load());
+
+        // Shape ordering buttons
+        document.getElementById('tool-bring-front').addEventListener('click', () => this.bringToFront());
+        document.getElementById('tool-send-back').addEventListener('click', () => this.sendToBack());
+        document.getElementById('tool-bring-forward').addEventListener('click', () => this.bringForward());
+        document.getElementById('tool-send-backward').addEventListener('click', () => this.sendBackward());
 
         // Grid dropdown
         document.getElementById('grid-size').addEventListener('change', (e) => {
@@ -918,6 +939,73 @@ class VectorEditor {
         }
     }
 
+    bringToFront() {
+        if (this.selectedShapes.length === 0) return;
+
+        // Move all selected shapes to the end (front) of the array
+        this.selectedShapes.forEach(shape => {
+            const index = this.shapes.indexOf(shape);
+            if (index > -1) {
+                this.shapes.splice(index, 1);
+                this.shapes.push(shape);
+            }
+        });
+        this.render();
+    }
+
+    sendToBack() {
+        if (this.selectedShapes.length === 0) return;
+
+        // Move all selected shapes to the beginning (back) of the array
+        // Reverse to maintain relative order
+        [...this.selectedShapes].reverse().forEach(shape => {
+            const index = this.shapes.indexOf(shape);
+            if (index > -1) {
+                this.shapes.splice(index, 1);
+                this.shapes.unshift(shape);
+            }
+        });
+        this.render();
+    }
+
+    bringForward() {
+        if (this.selectedShapes.length === 0) return;
+
+        // Sort by current index to avoid conflicts
+        const sorted = [...this.selectedShapes].sort((a, b) =>
+            this.shapes.indexOf(b) - this.shapes.indexOf(a)
+        );
+
+        sorted.forEach(shape => {
+            const index = this.shapes.indexOf(shape);
+            if (index > -1 && index < this.shapes.length - 1) {
+                // Swap with next shape
+                [this.shapes[index], this.shapes[index + 1]] =
+                [this.shapes[index + 1], this.shapes[index]];
+            }
+        });
+        this.render();
+    }
+
+    sendBackward() {
+        if (this.selectedShapes.length === 0) return;
+
+        // Sort by current index to avoid conflicts
+        const sorted = [...this.selectedShapes].sort((a, b) =>
+            this.shapes.indexOf(a) - this.shapes.indexOf(b)
+        );
+
+        sorted.forEach(shape => {
+            const index = this.shapes.indexOf(shape);
+            if (index > 0) {
+                // Swap with previous shape
+                [this.shapes[index], this.shapes[index - 1]] =
+                [this.shapes[index - 1], this.shapes[index]];
+            }
+        });
+        this.render();
+    }
+
     undo() {
         if (this.shapes.length > 0) {
             this.shapes.pop();
@@ -1052,6 +1140,16 @@ class VectorEditor {
         }
         if (e.key === '0') {
             this.zoomReset();
+            e.preventDefault();
+        }
+
+        // Shape ordering
+        if (e.key === ']') {
+            this.bringToFront();
+            e.preventDefault();
+        }
+        if (e.key === '[') {
+            this.sendToBack();
             e.preventDefault();
         }
 
