@@ -12,13 +12,30 @@ class VectorEditor {
         // Disable antialiasing for pixel-perfect rendering
         this.ctx.imageSmoothingEnabled = false;
 
-        // TIC-80 color palette
-        this.colors = [
-            '#1a1c2c', '#5d275d', '#b13e53', '#ef7d57',
-            '#ffcd75', '#a7f070', '#38b764', '#257179',
-            '#29366f', '#3b5dc9', '#41a6f6', '#73eff7',
-            '#f4f4f4', '#94b0c2', '#566c86', '#333c57'
-        ];
+        // Color palettes
+        this.palettes = {
+            'tic80': [
+                '#1a1c2c', '#5d275d', '#b13e53', '#ef7d57',
+                '#ffcd75', '#a7f070', '#38b764', '#257179',
+                '#29366f', '#3b5dc9', '#41a6f6', '#73eff7',
+                '#f4f4f4', '#94b0c2', '#566c86', '#333c57'
+            ],
+            'pico8': [
+                '#000000', '#1D2B53', '#7E2553', '#008751',
+                '#AB5236', '#5F574F', '#C2C3C7', '#FFF1E8',
+                '#FF004D', '#FFA300', '#FFEC27', '#00E436',
+                '#29ADFF', '#83769C', '#FF77A8', '#FFCCAA'
+            ],
+            'gameboy': [
+                '#0f380f', '#306230', '#8bac0f', '#9bbc0f'
+            ],
+            '1bit': [
+                '#000000', '#ffffff'
+            ]
+        };
+
+        this.currentPalette = 'tic80';
+        this.colors = [...this.palettes['tic80']];
 
         // State
         this.currentColor = 0;
@@ -64,14 +81,74 @@ class VectorEditor {
 
     setupColorPalette() {
         const palette = document.getElementById('colorPalette');
+        palette.innerHTML = ''; // Clear existing palette
+
+        // Adjust grid columns based on palette size
+        const columns = this.colors.length <= 4 ? this.colors.length : 8;
+        palette.style.gridTemplateColumns = `repeat(${columns}, 30px)`;
+
         this.colors.forEach((color, index) => {
             const btn = document.createElement('div');
             btn.className = 'color-btn';
             btn.style.backgroundColor = color;
-            if (index === 0) btn.classList.add('selected');
+            if (index === this.currentColor) btn.classList.add('selected');
             btn.addEventListener('click', () => this.selectColor(index));
             palette.appendChild(btn);
         });
+    }
+
+    setPalette(paletteId) {
+        if (this.palettes[paletteId]) {
+            this.currentPalette = paletteId;
+            this.colors = [...this.palettes[paletteId]];
+
+            // Reset color selection if out of bounds
+            if (this.currentColor >= this.colors.length) {
+                this.currentColor = 0;
+            }
+
+            this.setupColorPalette();
+            this.render();
+        }
+    }
+
+    async importLospecPalette() {
+        const url = prompt('Enter Lospec palette URL or slug (e.g., "sweetie-16" or full URL):');
+        if (!url) return;
+
+        try {
+            // Extract slug from URL if full URL provided
+            let slug = url;
+            if (url.includes('lospec.com')) {
+                const match = url.match(/\/palette-list\/([^\/]+)/);
+                if (match) slug = match[1];
+            }
+
+            // Fetch palette from Lospec API
+            const response = await fetch(`https://lospec.com/palette-list/${slug}.json`);
+            if (!response.ok) throw new Error('Palette not found');
+
+            const data = await response.json();
+            const colors = data.colors.map(c => '#' + c);
+
+            // Add to palettes
+            const paletteName = `lospec_${slug}`;
+            this.palettes[paletteName] = colors;
+            this.currentPalette = paletteName;
+            this.colors = [...colors];
+
+            // Reset color selection if needed
+            if (this.currentColor >= this.colors.length) {
+                this.currentColor = 0;
+            }
+
+            this.setupColorPalette();
+            this.render();
+
+            alert(`Successfully imported "${data.name}" palette with ${colors.length} colors!`);
+        } catch (error) {
+            alert('Failed to import palette. Please check the URL/slug and try again.\n\nExample slugs: sweetie-16, apollo, aap-64');
+        }
     }
 
     setupEventListeners() {
@@ -122,6 +199,18 @@ class VectorEditor {
             } else if (this.selectedShape) {
                 this.selectedShape.outline = !this.selectedShape.outline;
                 this.render();
+            }
+        });
+
+        // Palette selector
+        document.getElementById('palette-select').addEventListener('change', (e) => {
+            const paletteId = e.target.value;
+            if (paletteId === 'lospec') {
+                this.importLospecPalette();
+                // Reset dropdown to current palette
+                e.target.value = this.currentPalette;
+            } else {
+                this.setPalette(paletteId);
             }
         });
 
