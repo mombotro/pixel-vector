@@ -146,6 +146,184 @@
             border-radius: 3px;
             font-family: 'Courier New', monospace;
         }
+
+        .shape-order-panel {
+            background: #0f3460;
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 15px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .shape-order-panel h3 {
+            color: #00d9ff;
+            font-size: 13px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .shape-order-list {
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 2px;
+        }
+
+        .shape-order-item {
+            background: #16213e;
+            border: 1px solid #533483;
+            border-radius: 3px;
+            padding: 6px 8px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: grab;
+            transition: all 0.15s;
+            user-select: none;
+        }
+
+        .shape-order-item:hover {
+            background: #1f2e4d;
+            border-color: #7b4fb8;
+        }
+
+        .shape-order-item.selected {
+            background: #00d9ff;
+            color: #000;
+            border-color: #00d9ff;
+            font-weight: bold;
+        }
+
+        .shape-order-item.dragging {
+            opacity: 0.5;
+            cursor: grabbing;
+        }
+
+        .shape-order-item.drag-over-top {
+            border-top: 3px solid #00d9ff;
+            padding-top: 4px;
+        }
+
+        .shape-order-item.drag-over-bottom {
+            border-bottom: 3px solid #00d9ff;
+            padding-bottom: 4px;
+        }
+
+        .shape-order-item .shape-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .shape-order-item .shape-label {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            padding: 2px;
+            border-radius: 2px;
+        }
+
+        .shape-order-item .shape-label:hover {
+            background: rgba(0, 217, 255, 0.1);
+        }
+
+        .shape-order-item .shape-z-index {
+            color: #888;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+
+        .shape-order-item.selected .shape-z-index {
+            color: #333;
+        }
+
+        .shape-order-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .shape-order-panel::-webkit-scrollbar-track {
+            background: #16213e;
+            border-radius: 4px;
+        }
+
+        .shape-order-panel::-webkit-scrollbar-thumb {
+            background: #533483;
+            border-radius: 4px;
+        }
+
+        .shape-order-panel::-webkit-scrollbar-thumb:hover {
+            background: #7b4fb8;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: #16213e;
+            border: 2px solid #00d9ff;
+            border-radius: 8px;
+            padding: 20px;
+            min-width: 300px;
+            box-shadow: 0 4px 20px rgba(0, 217, 255, 0.3);
+        }
+
+        .modal-content h3 {
+            margin: 0 0 15px 0;
+            color: #00d9ff;
+            font-size: 16px;
+        }
+
+        .modal-content input {
+            width: 100%;
+            padding: 8px;
+            background: #0f3460;
+            border: 1px solid #533483;
+            border-radius: 4px;
+            color: #fff;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin-bottom: 15px;
+            outline: none;
+        }
+
+        .modal-content input:focus {
+            border-color: #00d9ff;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .modal-buttons button {
+            padding: 8px 16px;
+        }
     </style>
 </head>
 <body>
@@ -222,6 +400,14 @@
         </div>
 
         <div class="color-palette" id="colorPalette"></div>
+
+        <div class="shape-order-panel">
+            <h3>
+                <span>Shape Order</span>
+                <span style="font-size: 10px; font-weight: normal; color: #888;">Front → Back</span>
+            </h3>
+            <div class="shape-order-list" id="shapeOrderList"></div>
+        </div>
 
         <div class="toolbar">
             <div class="tool-group">
@@ -301,6 +487,18 @@
 
         <div class="info" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #0f3460;">
             A tool from the Azirona Drift - <a href="https://azirona.com" target="_blank" style="color: #00d9ff; text-decoration: none;">azirona.com</a>
+        </div>
+    </div>
+
+    <!-- Rename Modal -->
+    <div id="renameModal" class="modal">
+        <div class="modal-content">
+            <h3>Rename Shape</h3>
+            <input type="text" id="renameInput" placeholder="Enter shape name">
+            <div class="modal-buttons">
+                <button id="renameOk">OK</button>
+                <button id="renameCancel">Cancel</button>
+            </div>
         </div>
     </div>
 

@@ -59,6 +59,8 @@ class VectorEditor {
         this.dragMode = null; // 'point', 'shape', or 'selection-box'
         this.lockDirection = null; // 'horizontal', 'vertical', or null
         this.selectionBox = null; // {x1, y1, x2, y2} for drag selection
+        this.draggedShapeIndex = null; // Track shape being dragged in order preview
+        this.isEditingShapeName = false; // Track if currently editing a shape name
 
         // Undo/redo history
         this.history = [];
@@ -750,7 +752,8 @@ class VectorEditor {
             color: this.currentColor,
             lineWidth: this.lineWidth,
             outline: false,
-            points: [...this.currentPoints]
+            points: [...this.currentPoints],
+            name: null // Custom name (null = use default type name)
         };
 
         this.shapes.push(shape);
@@ -1673,6 +1676,9 @@ class VectorEditor {
         if (this.selectedShapes.length > 1 && this.currentTool === 'select') {
             this.drawMultiSelectionBox();
         }
+
+        // Update shape order preview
+        this.updateShapeOrderPreview();
     }
 
     drawGrid() {
@@ -2284,6 +2290,331 @@ class VectorEditor {
 
         this.ctx.setLineDash([]);
         this.ctx.restore();
+    }
+
+    updateShapeOrderPreview() {
+        const listElement = document.getElementById('shapeOrderList');
+        if (!listElement) return;
+
+        // Don't update if currently editing a shape name
+        if (this.isEditingShapeName) return;
+
+        listElement.innerHTML = '';
+
+        if (this.shapes.length === 0) {
+            listElement.innerHTML = '<div style="text-align: center; color: #888; font-size: 11px; padding: 10px;">No shapes</div>';
+            return;
+        }
+
+        // Add drop zone handlers to the list container for edge cases
+        listElement.ondragover = (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        };
+
+        listElement.ondrop = (e) => {
+            e.preventDefault();
+            if (this.draggedShapeIndex === null) return;
+
+            // Check if dropped in empty space at top or bottom
+            const listRect = listElement.getBoundingClientRect();
+            const mouseY = e.clientY;
+
+            // Since list is reversed, top = front (highest index), bottom = back (lowest index)
+            if (mouseY < listRect.top + 20) {
+                // Dropped at very top = move to front (end of array)
+                this.reorderShape(this.draggedShapeIndex, this.shapes.length);
+            } else if (mouseY > listRect.bottom - 20) {
+                // Dropped at very bottom = move to back (start of array)
+                this.reorderShape(this.draggedShapeIndex, 0);
+            }
+        };
+
+        this.shapes.forEach((shape, index) => {
+            const item = document.createElement('div');
+            item.className = 'shape-order-item';
+
+            // Check if this shape is selected
+            if (this.selectedShapes.includes(shape)) {
+                item.classList.add('selected');
+            }
+
+            // Create shape icon with color
+            const icon = document.createElement('div');
+            icon.className = 'shape-icon';
+            icon.style.backgroundColor = this.colors[shape.color] || '#ffffff';
+
+            // Add shape type letter to icon
+            const typeChar = {
+                'line': 'L',
+                'rect': 'R',
+                'circle': 'C',
+                'oval': 'O',
+                'triangle': 'T',
+                'polygon': 'P',
+                'fill': 'F'
+            }[shape.type] || '?';
+            icon.textContent = typeChar;
+
+            // Determine text color for icon (black or white based on background)
+            const bgColor = this.colors[shape.color] || '#ffffff';
+            const rgb = this.hexToRgb(bgColor);
+            const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+            icon.style.color = brightness > 128 ? '#000' : '#fff';
+
+            // Create label
+            const label = document.createElement('div');
+            label.className = 'shape-label';
+            const outlineText = shape.outline ? ' (outline)' : '';
+            const defaultName = `${shape.type.charAt(0).toUpperCase() + shape.type.slice(1)}${outlineText}`;
+            label.textContent = shape.name || defaultName;
+
+            // Add double-click to rename
+            label.addEventListener('dblclick', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.startRenameShape(shape, label, defaultName);
+            });
+
+            // Create z-index indicator
+            const zIndex = document.createElement('div');
+            zIndex.className = 'shape-z-index';
+            zIndex.textContent = `#${index}`;
+
+            // Assemble item
+            item.appendChild(icon);
+            item.appendChild(label);
+            item.appendChild(zIndex);
+
+            // Make item draggable
+            item.draggable = true;
+            item.dataset.shapeIndex = index;
+
+            // Drag start
+            item.addEventListener('dragstart', (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', index);
+                item.classList.add('dragging');
+                this.draggedShapeIndex = index;
+            });
+
+            // Drag end
+            item.addEventListener('dragend', (e) => {
+                item.classList.remove('dragging');
+                // Clean up any drag-over classes
+                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                    el.classList.remove('drag-over-top', 'drag-over-bottom');
+                });
+                this.draggedShapeIndex = null;
+            });
+
+            // Drag over
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+
+                if (this.draggedShapeIndex === null) return;
+
+                // Remove previous drag-over classes
+                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                    el.classList.remove('drag-over-top', 'drag-over-bottom');
+                });
+
+                // Determine if we should insert above or below
+                // Note: List is reversed (column-reverse), so top = higher index, bottom = lower index
+                const rect = item.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                const mouseY = e.clientY;
+
+                if (mouseY < midpoint) {
+                    // Top half - visually above means higher index (towards front)
+                    item.classList.add('drag-over-top');
+                } else {
+                    // Bottom half - visually below means lower index (towards back)
+                    item.classList.add('drag-over-bottom');
+                }
+            });
+
+            // Drag leave
+            item.addEventListener('dragleave', (e) => {
+                item.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+
+            // Drop
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (this.draggedShapeIndex === null) return;
+
+                const targetIndex = parseInt(item.dataset.shapeIndex);
+
+                // Determine insertion index
+                // List is reversed (column-reverse): top = high index (front), bottom = low index (back)
+                const rect = item.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                const mouseY = e.clientY;
+
+                let insertIndex;
+                if (mouseY < midpoint) {
+                    // Dropping above target (visually) = insert after target (higher index)
+                    insertIndex = targetIndex + 1;
+                } else {
+                    // Dropping below target (visually) = insert at target position (same or lower index)
+                    insertIndex = targetIndex;
+                }
+
+                // Reorder the shapes
+                this.reorderShape(this.draggedShapeIndex, insertIndex);
+
+                // Clean up
+                item.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+
+            // Helper function to select shape
+            const selectShape = (e) => {
+                if (e.shiftKey) {
+                    // Toggle selection with shift
+                    const shapeIndex = this.selectedShapes.indexOf(shape);
+                    if (shapeIndex > -1) {
+                        this.selectedShapes.splice(shapeIndex, 1);
+                        if (this.selectedShape === shape) {
+                            this.selectedShape = this.selectedShapes[0] || null;
+                        }
+                    } else {
+                        this.selectedShapes.push(shape);
+                        this.selectedShape = shape;
+                    }
+                } else {
+                    // Single selection
+                    this.selectedShape = shape;
+                    this.selectedShapes = [shape];
+                }
+                this.currentTool = 'select';
+                document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+                document.getElementById('tool-select').classList.add('active');
+                this.render();
+                this.updateShapeOrderPreview();
+            };
+
+            // Add click handler to icon and z-index (not label, to allow double-click rename)
+            icon.addEventListener('click', selectShape);
+            zIndex.addEventListener('click', selectShape);
+
+            // Add single click to label for selection
+            label.addEventListener('click', selectShape);
+
+            listElement.appendChild(item);
+        });
+    }
+
+    reorderShape(fromIndex, toIndex) {
+        // Validate indices
+        if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= this.shapes.length) {
+            return;
+        }
+
+        // Adjust toIndex if necessary
+        if (toIndex < 0) toIndex = 0;
+        if (toIndex > this.shapes.length) toIndex = this.shapes.length;
+
+        // Remove shape from old position
+        const [shape] = this.shapes.splice(fromIndex, 1);
+
+        // Adjust insert index if we're moving forward
+        let insertIndex = toIndex;
+        if (fromIndex < toIndex) {
+            insertIndex--;
+        }
+
+        // Insert at new position
+        this.shapes.splice(insertIndex, 0, shape);
+
+        // Re-render
+        this.render();
+    }
+
+    startRenameShape(shape, labelElement, defaultName) {
+        // Prevent renaming if already editing
+        if (this.isEditingShapeName) return;
+
+        // Set editing flag
+        this.isEditingShapeName = true;
+
+        // Get modal elements
+        const modal = document.getElementById('renameModal');
+        const input = document.getElementById('renameInput');
+        const okBtn = document.getElementById('renameOk');
+        const cancelBtn = document.getElementById('renameCancel');
+
+        // Set initial value
+        input.value = shape.name || '';
+        input.placeholder = defaultName;
+
+        // Show modal
+        modal.classList.add('show');
+
+        // Focus and select
+        setTimeout(() => {
+            input.focus();
+            input.select();
+        }, 0);
+
+        // Function to close modal
+        const closeModal = (save) => {
+            if (save) {
+                const newName = input.value.trim();
+                shape.name = newName || null; // null = use default name
+            }
+
+            // Hide modal
+            modal.classList.remove('show');
+
+            // Clear editing flag
+            this.isEditingShapeName = false;
+
+            // Rebuild the preview
+            this.render();
+
+            // Clean up event listeners
+            okBtn.removeEventListener('click', okHandler);
+            cancelBtn.removeEventListener('click', cancelHandler);
+            input.removeEventListener('keydown', keyHandler);
+            modal.removeEventListener('click', backdropHandler);
+        };
+
+        // Event handlers
+        const okHandler = () => closeModal(true);
+        const cancelHandler = () => closeModal(false);
+        const keyHandler = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                closeModal(true);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeModal(false);
+            }
+        };
+        const backdropHandler = (e) => {
+            if (e.target === modal) {
+                closeModal(false);
+            }
+        };
+
+        // Attach event listeners
+        okBtn.addEventListener('click', okHandler);
+        cancelBtn.addEventListener('click', cancelHandler);
+        input.addEventListener('keydown', keyHandler);
+        modal.addEventListener('click', backdropHandler);
+    }
+
+    hexToRgb(hex) {
+        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+        return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+        } : { r: 0, g: 0, b: 0 };
     }
 }
 
