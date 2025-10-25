@@ -62,6 +62,11 @@ class VectorEditor {
         this.draggedShapeIndex = null; // Track shape being dragged in order preview
         this.isEditingShapeName = false; // Track if currently editing a shape name
 
+        // Cache for preview updates - avoid rebuilding on every render
+        this.lastShapeCount = 0;
+        this.lastHistoryIndex = -1;
+        this.lastSelectedShapeCount = 0;
+
         // Undo/redo history
         this.history = [];
         this.historyIndex = -1;
@@ -98,8 +103,8 @@ class VectorEditor {
         const palette = document.getElementById('colorPalette');
         palette.innerHTML = ''; // Clear existing palette
 
-        // Adjust grid columns based on palette size
-        const columns = this.colors.length <= 4 ? this.colors.length : 8;
+        // Always use 5 columns max
+        const columns = Math.min(this.colors.length, 5);
         palette.style.gridTemplateColumns = `repeat(${columns}, 30px)`;
 
         this.colors.forEach((color, index) => {
@@ -195,14 +200,27 @@ class VectorEditor {
             });
         });
 
-        // Action buttons
-        document.getElementById('tool-copy').addEventListener('click', () => this.copyShape());
-        document.getElementById('tool-paste').addEventListener('click', () => this.pasteShape());
-        document.getElementById('tool-delete').addEventListener('click', () => this.deleteShape());
-        document.getElementById('tool-undo').addEventListener('click', () => this.undo());
-        document.getElementById('tool-clear').addEventListener('click', () => this.clear());
-        document.getElementById('tool-save').addEventListener('click', () => this.save());
-        document.getElementById('tool-load').addEventListener('click', () => this.load());
+        // Action buttons (these are now in dropdown menus, handled in DOMContentLoaded)
+        const toolCopy = document.getElementById('tool-copy');
+        if (toolCopy) toolCopy.addEventListener('click', () => this.copyShape());
+
+        const toolPaste = document.getElementById('tool-paste');
+        if (toolPaste) toolPaste.addEventListener('click', () => this.pasteShape());
+
+        const toolDelete = document.getElementById('tool-delete');
+        if (toolDelete) toolDelete.addEventListener('click', () => this.deleteShape());
+
+        const toolUndo = document.getElementById('tool-undo');
+        if (toolUndo) toolUndo.addEventListener('click', () => this.undo());
+
+        const toolClear = document.getElementById('tool-clear');
+        if (toolClear) toolClear.addEventListener('click', () => this.clear());
+
+        const toolSave = document.getElementById('tool-save');
+        if (toolSave) toolSave.addEventListener('click', () => this.save());
+
+        const toolLoad = document.getElementById('tool-load');
+        if (toolLoad) toolLoad.addEventListener('click', () => this.load());
 
         // Shape ordering buttons
         document.getElementById('tool-bring-front').addEventListener('click', () => this.bringToFront());
@@ -218,58 +236,76 @@ class VectorEditor {
         // Convert to polygon button
         document.getElementById('tool-to-polygon').addEventListener('click', () => this.convertToPolygon());
 
-        // Grid dropdown
-        document.getElementById('grid-size').addEventListener('change', (e) => {
-            this.gridCells = parseInt(e.target.value);
-            this.render();
-        });
-
-        document.getElementById('toggle-grid').addEventListener('click', () => {
-            this.showGrid = !this.showGrid;
-            document.getElementById('toggle-grid').textContent = this.showGrid ? 'Hide Grid' : 'Show Grid';
-            this.render();
-        });
-
-        document.getElementById('toggle-outline').addEventListener('click', () => {
-            // Toggle outline for all selected shapes
-            if (this.selectedShapes.length > 0) {
-                // Determine new outline state (toggle first shape's state)
-                const newOutlineState = !this.selectedShapes[0].outline;
-                this.selectedShapes.forEach(shape => {
-                    shape.outline = newOutlineState;
-                });
+        // Grid dropdown (if exists)
+        const gridSize = document.getElementById('grid-size');
+        if (gridSize) {
+            gridSize.addEventListener('change', (e) => {
+                this.gridCells = parseInt(e.target.value);
                 this.render();
-            } else if (this.selectedShape) {
-                this.selectedShape.outline = !this.selectedShape.outline;
+            });
+        }
+
+        const toggleGrid = document.getElementById('toggle-grid');
+        if (toggleGrid) {
+            toggleGrid.addEventListener('click', () => {
+                this.showGrid = !this.showGrid;
+                toggleGrid.textContent = this.showGrid ? 'Hide Grid' : 'Show Grid';
                 this.render();
-            }
-        });
+            });
+        }
+
+        const toggleOutline = document.getElementById('toggle-outline');
+        if (toggleOutline) {
+            toggleOutline.addEventListener('click', () => {
+                // Toggle outline for all selected shapes
+                if (this.selectedShapes.length > 0) {
+                    // Determine new outline state (toggle first shape's state)
+                    const newOutlineState = !this.selectedShapes[0].outline;
+                    this.selectedShapes.forEach(shape => {
+                        shape.outline = newOutlineState;
+                    });
+                    this.render();
+                } else if (this.selectedShape) {
+                    this.selectedShape.outline = !this.selectedShape.outline;
+                    this.render();
+                }
+            });
+        }
 
         // Palette selector
-        document.getElementById('palette-select').addEventListener('change', (e) => {
-            const paletteId = e.target.value;
-            if (paletteId === 'lospec') {
-                this.importLospecPalette();
-                // Reset dropdown to current palette
-                e.target.value = this.currentPalette;
-            } else {
-                this.setPalette(paletteId);
-            }
-        });
+        const paletteSelect = document.getElementById('palette-select');
+        if (paletteSelect) {
+            paletteSelect.addEventListener('change', (e) => {
+                const paletteId = e.target.value;
+                if (paletteId === 'lospec') {
+                    this.importLospecPalette();
+                    // Reset dropdown to current palette
+                    e.target.value = this.currentPalette;
+                } else {
+                    this.setPalette(paletteId);
+                }
+            });
+        }
 
-        // Background color picker
-        document.getElementById('bg-color').addEventListener('input', (e) => {
-            this.backgroundColor = e.target.value;
-            this.render();
-        });
+        // Background color picker (if exists)
+        const bgColor = document.getElementById('bg-color');
+        if (bgColor) {
+            bgColor.addEventListener('input', (e) => {
+                this.backgroundColor = e.target.value;
+                this.render();
+            });
+        }
 
-        // Aspect ratio dropdown
-        document.getElementById('aspect-ratio').addEventListener('change', (e) => {
-            this.aspectRatio = e.target.value;
-            this.updateCanvasDimensions();
-        });
+        // Aspect ratio dropdown (if exists)
+        const aspectRatio = document.getElementById('aspect-ratio');
+        if (aspectRatio) {
+            aspectRatio.addEventListener('change', (e) => {
+                this.aspectRatio = e.target.value;
+                this.updateCanvasDimensions();
+            });
+        }
 
-        // Orientation buttons
+        // Orientation buttons (if exist)
         document.querySelectorAll('.orientation-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const orientationId = e.target.id;
@@ -285,10 +321,15 @@ class VectorEditor {
             });
         });
 
-        // Zoom controls
-        document.getElementById('zoom-in').addEventListener('click', () => this.zoomIn());
-        document.getElementById('zoom-out').addEventListener('click', () => this.zoomOut());
-        document.getElementById('zoom-reset').addEventListener('click', () => this.zoomReset());
+        // Zoom controls (if exist)
+        const zoomIn = document.getElementById('zoom-in');
+        if (zoomIn) zoomIn.addEventListener('click', () => this.zoomIn());
+
+        const zoomOut = document.getElementById('zoom-out');
+        if (zoomOut) zoomOut.addEventListener('click', () => this.zoomOut());
+
+        const zoomReset = document.getElementById('zoom-reset');
+        if (zoomReset) zoomReset.addEventListener('click', () => this.zoomReset());
 
         // Scroll wheel zoom
         this.canvas.addEventListener('wheel', (e) => {
@@ -322,7 +363,10 @@ class VectorEditor {
     updateCanvasScale() {
         this.canvas.width = this.canvasWidth * this.scale;
         this.canvas.height = this.canvasHeight * this.scale;
-        document.getElementById('zoom-level').textContent = `${Math.round(this.scale * 50)}%`;
+        const zoomLevel = document.getElementById('zoom-level');
+        if (zoomLevel) {
+            zoomLevel.textContent = `${Math.round(this.scale * 50)}%`;
+        }
         this.render();
     }
 
@@ -360,9 +404,11 @@ class VectorEditor {
                 shape.color = index;
             });
             this.render();
+            this.updateShapeOrderPreview();
         } else if (this.selectedShape) {
             this.selectedShape.color = index;
             this.render();
+            this.updateShapeOrderPreview();
         }
     }
 
@@ -999,6 +1045,7 @@ class VectorEditor {
             }
         });
         this.render();
+        this.updateShapeOrderPreview();
     }
 
     sendToBack() {
@@ -1014,6 +1061,7 @@ class VectorEditor {
             }
         });
         this.render();
+        this.updateShapeOrderPreview();
     }
 
     bringForward() {
@@ -1033,6 +1081,7 @@ class VectorEditor {
             }
         });
         this.render();
+        this.updateShapeOrderPreview();
     }
 
     sendBackward() {
@@ -1052,6 +1101,7 @@ class VectorEditor {
             }
         });
         this.render();
+        this.updateShapeOrderPreview();
     }
 
     booleanUnion() {
@@ -1536,6 +1586,30 @@ class VectorEditor {
     }
 
     handleKeyDown(e) {
+        // Ctrl shortcuts - handle these first to prevent conflicts
+        if (e.ctrlKey || e.metaKey) {
+            if (e.key === 'c' || e.key === 'C') {
+                this.copyShape();
+                e.preventDefault();
+                return;
+            }
+            if (e.key === 'v' || e.key === 'V') {
+                this.pasteShape();
+                e.preventDefault();
+                return;
+            }
+            if (e.key === 'z' || e.key === 'Z') {
+                this.undo();
+                e.preventDefault();
+                return;
+            }
+            if (e.key === 's' || e.key === 'S') {
+                this.save();
+                e.preventDefault();
+                return;
+            }
+        }
+
         // Tool selection
         if (e.key >= '1' && e.key <= '6') {
             const tools = ['line', 'rect', 'circle', 'oval', 'triangle', 'polygon'];
@@ -1562,7 +1636,10 @@ class VectorEditor {
         // Grid toggle
         if (e.key === 'g' || e.key === 'G') {
             this.showGrid = !this.showGrid;
-            document.getElementById('toggle-grid').textContent = this.showGrid ? 'Hide Grid' : 'Show Grid';
+            const toggleGrid = document.getElementById('toggle-grid');
+            if (toggleGrid) {
+                toggleGrid.textContent = this.showGrid ? 'Hide Grid' : 'Show Grid';
+            }
             this.render();
             e.preventDefault();
         }
@@ -1619,26 +1696,6 @@ class VectorEditor {
             this.deleteShape();
             e.preventDefault();
         }
-
-        // Ctrl shortcuts
-        if (e.ctrlKey || e.metaKey) {
-            if (e.key === 'c' || e.key === 'C') {
-                this.copyShape();
-                e.preventDefault();
-            }
-            if (e.key === 'v' || e.key === 'V') {
-                this.pasteShape();
-                e.preventDefault();
-            }
-            if (e.key === 'z' || e.key === 'Z') {
-                this.undo();
-                e.preventDefault();
-            }
-            if (e.key === 's' || e.key === 'S') {
-                this.save();
-                e.preventDefault();
-            }
-        }
     }
 
     render() {
@@ -1677,8 +1734,21 @@ class VectorEditor {
             this.drawMultiSelectionBox();
         }
 
-        // Update shape order preview
-        this.updateShapeOrderPreview();
+        // Update previews only if something changed
+        const shapeCountChanged = this.shapes.length !== this.lastShapeCount;
+        const historyChanged = this.historyIndex !== this.lastHistoryIndex;
+        const selectionChanged = this.selectedShapes.length !== this.lastSelectedShapeCount;
+
+        if (shapeCountChanged || selectionChanged) {
+            this.updateShapeOrderPreview();
+            this.lastShapeCount = this.shapes.length;
+            this.lastSelectedShapeCount = this.selectedShapes.length;
+        }
+
+        if (historyChanged) {
+            this.updateHistoryPreview();
+            this.lastHistoryIndex = this.historyIndex;
+        }
     }
 
     drawGrid() {
@@ -2321,10 +2391,11 @@ class VectorEditor {
             const mouseY = e.clientY;
 
             // Since list is reversed, top = front (highest index), bottom = back (lowest index)
-            if (mouseY < listRect.top + 20) {
+            // Increase detection zone to 40px for easier targeting
+            if (mouseY < listRect.top + 40) {
                 // Dropped at very top = move to front (end of array)
                 this.reorderShape(this.draggedShapeIndex, this.shapes.length);
-            } else if (mouseY > listRect.bottom - 20) {
+            } else if (mouseY > listRect.bottom - 40) {
                 // Dropped at very bottom = move to back (start of array)
                 this.reorderShape(this.draggedShapeIndex, 0);
             }
@@ -2530,8 +2601,9 @@ class VectorEditor {
         // Insert at new position
         this.shapes.splice(insertIndex, 0, shape);
 
-        // Re-render
+        // Re-render and update shape order preview
         this.render();
+        this.updateShapeOrderPreview();
     }
 
     startRenameShape(shape, labelElement, defaultName) {
@@ -2616,7 +2688,264 @@ class VectorEditor {
             b: parseInt(result[3], 16)
         } : { r: 0, g: 0, b: 0 };
     }
+
+    updateHistoryPreview() {
+        const listElement = document.getElementById('historyList');
+        if (!listElement) return;
+
+        listElement.innerHTML = '';
+
+        if (this.history.length === 0) {
+            listElement.innerHTML = '<div style="text-align: center; color: #888; font-size: 11px; padding: 10px;">No history</div>';
+            return;
+        }
+
+        // Create history items (oldest to newest, top to bottom)
+        this.history.forEach((state, index) => {
+            const item = document.createElement('div');
+            item.className = 'history-item';
+
+            // Mark current state
+            if (index === this.historyIndex) {
+                item.classList.add('current');
+            }
+
+            // Create icon
+            const icon = document.createElement('div');
+            icon.className = 'history-icon';
+            icon.textContent = index === this.historyIndex ? '●' : index;
+
+            // Create label with shape count
+            const label = document.createElement('div');
+            label.className = 'history-label';
+            const shapeCount = state.length;
+
+            // Determine action based on comparison with previous state
+            let action = 'Initial';
+            if (index > 0) {
+                const prevCount = this.history[index - 1].length;
+                if (shapeCount > prevCount) {
+                    action = 'Add shape';
+                } else if (shapeCount < prevCount) {
+                    action = 'Delete shape';
+                } else {
+                    action = 'Edit';
+                }
+            }
+
+            label.textContent = `${action} (${shapeCount} shape${shapeCount !== 1 ? 's' : ''})`;
+
+            // Assemble item
+            item.appendChild(icon);
+            item.appendChild(label);
+
+            // Add click handler to jump to this state
+            item.addEventListener('click', () => {
+                this.jumpToHistory(index);
+            });
+
+            listElement.appendChild(item);
+        });
+
+        // Auto-scroll to current item
+        const currentItem = listElement.querySelector('.history-item.current');
+        if (currentItem) {
+            currentItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+    }
+
+    jumpToHistory(targetIndex) {
+        if (targetIndex < 0 || targetIndex >= this.history.length) return;
+        if (targetIndex === this.historyIndex) return;
+
+        // Set the history index
+        this.historyIndex = targetIndex;
+
+        // Restore the state
+        this.shapes = JSON.parse(JSON.stringify(this.history[targetIndex]));
+
+        // Clear selections
+        this.selectedShape = null;
+        this.selectedShapes = [];
+        this.selectedPoint = null;
+
+        // Re-render
+        this.render();
+    }
 }
 
-// Initialize the editor
-const editor = new VectorEditor();
+// Initialize everything when DOM is ready
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize the editor
+    window.editor = new VectorEditor();
+
+    // Tab switching functionality
+    const tabs = document.querySelectorAll('.tab');
+    console.log('Found tabs:', tabs.length);
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            console.log('Tab clicked:', tab.dataset.tab);
+            const tabName = tab.dataset.tab;
+
+            // Remove active from all tabs and tab contents
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
+
+            // Add active to clicked tab and corresponding content
+            tab.classList.add('active');
+            const targetContent = document.getElementById(`tab-${tabName}`);
+            console.log('Target content:', targetContent);
+            if (targetContent) {
+                targetContent.classList.add('active');
+            }
+        });
+    });
+
+    // Help modal functionality
+    const helpBtn = document.getElementById('helpBtn');
+    const helpModal = document.getElementById('helpModal');
+    const helpClose = document.getElementById('helpClose');
+
+    if (helpBtn) {
+        helpBtn.addEventListener('click', () => {
+            helpModal.classList.add('show');
+        });
+    }
+
+    if (helpClose) {
+        helpClose.addEventListener('click', () => {
+            helpModal.classList.remove('show');
+        });
+    }
+
+    if (helpModal) {
+        helpModal.addEventListener('click', (e) => {
+            if (e.target === helpModal) {
+                helpModal.classList.remove('show');
+            }
+        });
+    }
+
+    // Dropdown menu functionality
+    const dropdowns = document.querySelectorAll('.dropdown');
+    console.log('Found dropdowns:', dropdowns.length);
+    dropdowns.forEach(dropdown => {
+        const btn = dropdown.querySelector('.dropdown-btn');
+        if (btn) {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                console.log('Dropdown clicked');
+                // Close other dropdowns
+                dropdowns.forEach(d => {
+                    if (d !== dropdown) d.classList.remove('open');
+                });
+                // Toggle this dropdown
+                dropdown.classList.toggle('open');
+            });
+        }
+    });
+
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', () => {
+        dropdowns.forEach(d => d.classList.remove('open'));
+    });
+
+    // Wire up menu buttons to existing functions
+    const menuItems = {
+        'menu-save': () => window.editor.save(),
+        'menu-load': () => window.editor.load(),
+        'menu-clear': () => window.editor.clear(),
+        'menu-undo': () => window.editor.undo(),
+        'menu-copy': () => window.editor.copyShape(),
+        'menu-paste': () => window.editor.pasteShape(),
+        'menu-delete': () => window.editor.deleteShape()
+    };
+
+    Object.keys(menuItems).forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) {
+            btn.addEventListener('click', () => {
+                menuItems[id]();
+                dropdowns.forEach(d => d.classList.remove('open'));
+            });
+        }
+    });
+
+    // View menu functionality
+    const viewState = {
+        leftPanel: true,
+        colorPalette: true,
+        shapesPanel: true,
+        timelinePanel: true
+    };
+
+    const toggleView = (panelId, selector, label) => {
+        const panel = document.querySelector(selector);
+        const btn = document.getElementById(panelId);
+        if (!panel || !btn) return;
+
+        const isVisible = panel.style.display !== 'none';
+        panel.style.display = isVisible ? 'none' : '';
+
+        // Update button text
+        btn.textContent = isVisible ? `✗ ${label}` : `✓ ${label}`;
+    };
+
+    // View toggle buttons
+    document.getElementById('view-left-panel')?.addEventListener('click', () => {
+        toggleView('view-left-panel', '.left-panel', 'Left Toolbar');
+    });
+
+    document.getElementById('view-color-palette')?.addEventListener('click', () => {
+        toggleView('view-color-palette', '.panel-box:has(#colorPalette)', 'Color Palette');
+    });
+
+    document.getElementById('view-shapes-panel')?.addEventListener('click', () => {
+        toggleView('view-shapes-panel', '.panel-box:has(.tabs)', 'Shapes/History');
+    });
+
+    document.getElementById('view-timeline-panel')?.addEventListener('click', () => {
+        toggleView('view-timeline-panel', '.timeline-panel', 'Timeline');
+    });
+
+    // Zen mode - hide all panels
+    document.getElementById('view-zen-mode')?.addEventListener('click', () => {
+        const allHidden = document.querySelector('.left-panel').style.display === 'none';
+
+        if (allHidden) {
+            // Restore all panels
+            document.querySelector('.left-panel').style.display = '';
+            document.querySelector('.panel-box:has(#colorPalette)').style.display = '';
+            document.querySelector('.panel-box:has(.tabs)').style.display = '';
+            document.querySelector('.timeline-panel').style.display = '';
+
+            document.getElementById('view-left-panel').textContent = '✓ Left Toolbar';
+            document.getElementById('view-color-palette').textContent = '✓ Color Palette';
+            document.getElementById('view-shapes-panel').textContent = '✓ Shapes/History';
+            document.getElementById('view-timeline-panel').textContent = '✓ Timeline';
+
+            viewState.leftPanel = true;
+            viewState.colorPalette = true;
+            viewState.shapesPanel = true;
+            viewState.timelinePanel = true;
+        } else {
+            // Hide all panels
+            document.querySelector('.left-panel').style.display = 'none';
+            document.querySelector('.panel-box:has(#colorPalette)').style.display = 'none';
+            document.querySelector('.panel-box:has(.tabs)').style.display = 'none';
+            document.querySelector('.timeline-panel').style.display = 'none';
+
+            document.getElementById('view-left-panel').textContent = '✗ Left Toolbar';
+            document.getElementById('view-color-palette').textContent = '✗ Color Palette';
+            document.getElementById('view-shapes-panel').textContent = '✗ Shapes/History';
+            document.getElementById('view-timeline-panel').textContent = '✗ Timeline';
+
+            viewState.leftPanel = false;
+            viewState.colorPalette = false;
+            viewState.shapesPanel = false;
+            viewState.timelinePanel = false;
+        }
+
+        dropdowns.forEach(d => d.classList.remove('open'));
+    });
+});

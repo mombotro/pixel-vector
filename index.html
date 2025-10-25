@@ -16,61 +16,247 @@
             background: #1a1a2e;
             color: #eee;
             display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: #16213e;
+        }
+
+        .settings-bar {
+            background: #0f3460;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #1a1a2e;
+        }
+
+        .settings-bar h1 {
+            font-size: 18px;
+            color: #00d9ff;
+            margin: 0;
+        }
+
+        .help-btn {
+            background: #533483;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .help-btn:hover {
+            background: #7b4fb8;
+        }
+
+        /* Dropdown Menus */
+        .dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-btn {
+            background: #533483;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+
+        .dropdown-btn:hover {
+            background: #7b4fb8;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background: #0f3460;
+            min-width: 120px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 1000;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 2px;
+        }
+
+        .dropdown-content button {
+            background: none;
+            color: white;
+            padding: 8px 12px;
+            text-decoration: none;
+            display: block;
+            width: 100%;
+            text-align: left;
+            border: none;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .dropdown-content button:hover {
+            background: #16213e;
+        }
+
+        .dropdown.open .dropdown-content {
+            display: block;
+        }
+
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .left-panel {
+            width: 120px;
+            background: #0f3460;
+            border-right: 2px solid #1a1a2e;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+        }
+
+        .center-area {
+            flex: 1;
+            display: flex;
             justify-content: center;
             align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-
-        .container {
             background: #16213e;
-            border-radius: 8px;
             padding: 20px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            overflow: auto;
         }
 
-        h1 {
-            text-align: center;
-            margin-bottom: 15px;
-            font-size: 24px;
-            color: #00d9ff;
+        .right-panel {
+            display: flex;
+            gap: 10px;
+            background: #16213e;
+            padding: 10px;
+        }
+
+        .timeline-panel {
+            width: 250px;
+            max-width: 100%;
+            max-height: 100%;
+            background: #0f3460;
+            border-left: 2px solid #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            resize: both;
+            overflow: auto;
+            min-width: 150px;
+            min-height: 100px;
+        }
+
+        .side-panels {
+            width: 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
 
         #canvas {
             border: 2px solid #0f3460;
             background: #e8e8e8;
-            display: block;
-            margin: 0 auto 15px;
             cursor: crosshair;
             image-rendering: pixelated;
         }
 
-        .toolbar {
-            display: flex;
-            gap: 10px;
+        .tool-section {
             margin-bottom: 15px;
-            flex-wrap: wrap;
-            justify-content: center;
+        }
+
+        .tool-section h3 {
+            font-size: 11px;
+            color: #00d9ff;
+            margin-bottom: 5px;
+            text-transform: uppercase;
         }
 
         .tool-group {
-            background: #0f3460;
-            padding: 8px;
-            border-radius: 4px;
             display: flex;
+            flex-direction: column;
             gap: 5px;
+        }
+
+        .tabs {
+            display: flex;
+            background: #16213e;
+            border-bottom: 2px solid #1a1a2e;
+            position: relative;
+            z-index: 10;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 8px;
+            background: #0f3460;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            transition: all 0.2s;
+            width: auto;
+            text-align: center;
+        }
+
+        .tab:hover {
+            background: #16213e;
+            color: #00d9ff;
+        }
+
+        .tab.active {
+            background: #16213e;
+            color: #00d9ff;
+            border-bottom: 2px solid #00d9ff;
+        }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+            min-height: 0;
+        }
+
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
         }
 
         button {
             background: #533483;
             color: white;
             border: none;
-            padding: 8px 12px;
+            padding: 8px;
             border-radius: 4px;
             cursor: pointer;
             font-family: 'Courier New', monospace;
-            font-size: 12px;
+            font-size: 11px;
             transition: all 0.2s;
+        }
+
+        .left-panel button,
+        .modal-buttons button {
+            width: 100%;
+            text-align: left;
+        }
+
+        .modal-buttons button {
+            text-align: center;
         }
 
         button:hover {
@@ -83,13 +269,39 @@
             font-weight: bold;
         }
 
+        .tool-btn {
+            text-align: center;
+        }
+
         .color-palette {
             display: grid;
-            grid-template-columns: repeat(8, 30px);
+            grid-template-columns: repeat(5, 30px);
             gap: 4px;
             background: #0f3460;
             padding: 8px;
             border-radius: 4px;
+            width: fit-content;
+        }
+
+        .panel-box {
+            background: #0f3460;
+            border-radius: 4px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            resize: vertical;
+            overflow-y: auto;
+            overflow-x: hidden;
+            min-width: 150px;
+            min-height: 100px;
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        .panel-box h3 {
+            color: #00d9ff;
+            font-size: 12px;
+            margin-bottom: 8px;
         }
 
         .color-btn {
@@ -147,35 +359,21 @@
             font-family: 'Courier New', monospace;
         }
 
-        .shape-order-panel {
-            background: #0f3460;
-            border-radius: 4px;
-            padding: 10px;
-            margin-bottom: 15px;
-            max-height: 250px;
-            overflow-y: auto;
-        }
-
-        .shape-order-panel h3 {
-            color: #00d9ff;
-            font-size: 13px;
-            margin-bottom: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .shape-order-list {
+        .shape-order-list, .history-list {
             display: flex;
             flex-direction: column-reverse;
             gap: 2px;
+        }
+
+        .history-list {
+            flex-direction: column;
         }
 
         .shape-order-item {
             background: #16213e;
             border: 1px solid #533483;
             border-radius: 3px;
-            padding: 6px 8px;
+            padding: 8px;
             font-size: 11px;
             display: flex;
             align-items: center;
@@ -183,6 +381,8 @@
             cursor: grab;
             transition: all 0.15s;
             user-select: none;
+            position: relative;
+            margin: 2px 0;
         }
 
         .shape-order-item:hover {
@@ -198,18 +398,30 @@
         }
 
         .shape-order-item.dragging {
-            opacity: 0.5;
+            opacity: 0.3;
             cursor: grabbing;
         }
 
-        .shape-order-item.drag-over-top {
-            border-top: 3px solid #00d9ff;
-            padding-top: 4px;
+        .shape-order-item.drag-over-top::before {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: #00d9ff;
+            border-radius: 2px;
         }
 
-        .shape-order-item.drag-over-bottom {
-            border-bottom: 3px solid #00d9ff;
-            padding-bottom: 4px;
+        .shape-order-item.drag-over-bottom::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: #00d9ff;
+            border-radius: 2px;
         }
 
         .shape-order-item .shape-icon {
@@ -248,22 +460,56 @@
             color: #333;
         }
 
-        .shape-order-panel::-webkit-scrollbar {
-            width: 8px;
-        }
 
-        .shape-order-panel::-webkit-scrollbar-track {
+        .history-item {
             background: #16213e;
-            border-radius: 4px;
+            border: 1px solid #533483;
+            border-radius: 3px;
+            padding: 6px 8px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
         }
 
-        .shape-order-panel::-webkit-scrollbar-thumb {
+        .history-item:hover {
+            background: #1f2e4d;
+            border-color: #7b4fb8;
+        }
+
+        .history-item.current {
+            background: #00d9ff;
+            color: #000;
+            border-color: #00d9ff;
+            font-weight: bold;
+        }
+
+        .history-item .history-icon {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
             background: #533483;
-            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: bold;
+            flex-shrink: 0;
+            color: #fff;
         }
 
-        .shape-order-panel::-webkit-scrollbar-thumb:hover {
-            background: #7b4fb8;
+        .history-item.current .history-icon {
+            background: #000;
+            color: #00d9ff;
+        }
+
+        .history-item .history-label {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .modal {
@@ -324,169 +570,149 @@
         .modal-buttons button {
             padding: 8px 16px;
         }
+
+        /* Ko-fi button styling */
+        .kofi-btn {
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            font-weight: bold;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .kofi-btn:hover {
+            background: #00b8d4;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Vexel Edit: Vector-based Pixel Art Editor</h1>
-
-        <canvas id="canvas" width="480" height="272"></canvas>
-
-        <div class="toolbar">
-            <div class="tool-group">
-                <button id="tool-line" class="tool-btn active" title="Line (1)">Line</button>
-                <button id="tool-rect" class="tool-btn" title="Rectangle (2)">Rect</button>
-                <button id="tool-circle" class="tool-btn" title="Circle (3)">Circle</button>
-                <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval</button>
-                <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Tri</button>
-                <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Poly</button>
-                <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill</button>
+    <div class="app-container">
+        <!-- Settings Bar -->
+        <div class="settings-bar">
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <h1>Vexel Edit</h1>
+                <div class="dropdown">
+                    <button class="dropdown-btn">File ▾</button>
+                    <div class="dropdown-content">
+                        <button id="menu-save" title="Save (Ctrl+S)">Save</button>
+                        <button id="menu-load" title="Load">Load</button>
+                        <button id="menu-clear" title="Clear All">Clear</button>
+                    </div>
+                </div>
+                <div class="dropdown">
+                    <button class="dropdown-btn">Edit ▾</button>
+                    <div class="dropdown-content">
+                        <button id="menu-undo" title="Undo (Ctrl+Z)">Undo</button>
+                        <button id="menu-copy" title="Copy (Ctrl+C)">Copy</button>
+                        <button id="menu-paste" title="Paste (Ctrl+V)">Paste</button>
+                        <button id="menu-delete" title="Delete (Del)">Delete</button>
+                    </div>
+                </div>
+                <div class="dropdown">
+                    <button class="dropdown-btn">View ▾</button>
+                    <div class="dropdown-content">
+                        <button id="view-left-panel">✓ Left Toolbar</button>
+                        <button id="view-color-palette">✓ Color Palette</button>
+                        <button id="view-shapes-panel">✓ Shapes/History</button>
+                        <button id="view-timeline-panel">✓ Timeline</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button id="view-zen-mode">Zen Mode</button>
+                    </div>
+                </div>
             </div>
-
-            <div class="tool-group">
-                <button id="tool-select" class="tool-btn" title="Select (V)">Select</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-copy" title="Copy (Ctrl+C)">Copy</button>
-                <button id="tool-paste" title="Paste (Ctrl+V)">Paste</button>
-                <button id="tool-delete" title="Delete (Del/Backspace)">Delete</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-bring-front" title="Bring to Front (])">Front</button>
-                <button id="tool-send-back" title="Send to Back ([)">Back</button>
-                <button id="tool-bring-forward" title="Bring Forward">+1</button>
-                <button id="tool-send-backward" title="Send Backward">-1</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-union" title="Union (combine shapes)">Union</button>
-                <button id="tool-subtract" title="Subtract (remove from first)">Subtract</button>
-                <button id="tool-intersect" title="Intersect (keep overlap)">Intersect</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-to-polygon" title="Convert shape to polygon">To Polygon</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-undo" title="Undo (Ctrl+Z)">Undo</button>
-            </div>
-
-            <div class="tool-group">
-                <button id="tool-clear" title="Clear All">Clear</button>
-                <button id="tool-save" title="Save (Ctrl+S)">Save</button>
-                <button id="tool-load" title="Load">Load</button>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <a href="https://ko-fi.com/A0A2CFZ3G" target="_blank" class="kofi-btn">☕ Buy me a Mtn Dew</a>
+                <button class="help-btn" id="helpBtn">Help</button>
             </div>
         </div>
 
-        <div class="toolbar">
-            <div class="tool-group">
-                <label style="color: #00d9ff; margin-right: 10px;">Palette:</label>
-                <select id="palette-select" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
-                    <option value="16bit" selected>16-Bit Basic</option>
-                    <option value="tic80">TIC-80</option>
-                    <option value="pico8">Pico-8</option>
-                    <option value="gameboy">Game Boy</option>
-                    <option value="1bit">1-Bit (B&W)</option>
-                    <option value="lospec">Import from Lospec...</option>
-                </select>
-            </div>
-            <div class="tool-group">
-                <label style="color: #00d9ff; margin-right: 10px;">Background:</label>
-                <input type="color" id="bg-color" value="#e8e8e8" style="width: 50px; height: 30px; border: 1px solid #533483; border-radius: 3px; cursor: pointer; background: #0f3460;">
-            </div>
-        </div>
+        <!-- Main Layout -->
+        <div class="main-layout">
+            <!-- Left Panel - Tools -->
+            <div class="left-panel">
+                <div class="tool-section">
+                    <h3>Draw</h3>
+                    <div class="tool-group">
+                        <button id="tool-line" class="tool-btn active" title="Line (1)">Line</button>
+                        <button id="tool-rect" class="tool-btn" title="Rectangle (2)">Rect</button>
+                        <button id="tool-circle" class="tool-btn" title="Circle (3)">Circle</button>
+                        <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval</button>
+                        <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Triangle</button>
+                        <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Polygon</button>
+                        <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill</button>
+                        <button id="tool-select" class="tool-btn" title="Select (V)">Select</button>
+                    </div>
+                </div>
 
-        <div class="color-palette" id="colorPalette"></div>
+                <div class="tool-section">
+                    <h3>Boolean</h3>
+                    <div class="tool-group">
+                        <button id="tool-union" title="Union">Union</button>
+                        <button id="tool-subtract" title="Subtract">Subtract</button>
+                        <button id="tool-intersect" title="Intersect">Intersect</button>
+                        <button id="tool-to-polygon" title="To Polygon">To Poly</button>
+                    </div>
+                </div>
+            </div>
 
-        <div class="shape-order-panel">
-            <h3>
-                <span>Shape Order</span>
-                <span style="font-size: 10px; font-weight: normal; color: #888;">Front → Back</span>
-            </h3>
-            <div class="shape-order-list" id="shapeOrderList"></div>
-        </div>
+            <!-- Center Area - Canvas -->
+            <div class="center-area">
+                <canvas id="canvas" width="480" height="272"></canvas>
+            </div>
 
-        <div class="toolbar">
-            <div class="tool-group">
-                <label style="color: #00d9ff; margin-right: 10px;">Aspect:</label>
-                <select id="aspect-ratio" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
-                    <option value="1:1">1:1</option>
-                    <option value="4:3">4:3</option>
-                    <option value="3:2">3:2</option>
-                    <option value="16:9">16:9</option>
-                    <option value="2:1">2:1</option>
-                </select>
-            </div>
-            <div class="tool-group">
-                <button id="orientation-landscape" class="orientation-btn active" title="Landscape">Landscape</button>
-                <button id="orientation-portrait" class="orientation-btn" title="Portrait">Portrait</button>
-            </div>
-            <div class="tool-group">
-                <label style="color: #00d9ff; margin-right: 10px;">Grid:</label>
-                <select id="grid-size" style="padding: 6px; background: #0f3460; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer;">
-                    <option value="0">Off</option>
-                    <option value="4">4</option>
-                    <option value="8">8</option>
-                    <option value="12">12</option>
-                    <option value="16">16</option>
-                    <option value="24">24</option>
-                    <option value="32" selected>32</option>
-                    <option value="48">48</option>
-                    <option value="64">64</option>
-                    <option value="128">128</option>
-                    <option value="256">256</option>
-                    <option value="512">512</option>
-                </select>
-            </div>
-            <div class="tool-group">
-                <button id="toggle-grid" title="Show/Hide Grid (G)">Show Grid</button>
-            </div>
-            <div class="tool-group">
-                <button id="toggle-outline" title="Toggle Outline (O)">Toggle Outline</button>
-            </div>
-            <div class="tool-group">
-                <label style="color: #00d9ff; margin-right: 10px;">Zoom:</label>
-                <button id="zoom-out" title="Zoom Out (-)">-</button>
-                <span id="zoom-level" style="color: #00d9ff; margin: 0 8px; min-width: 40px; display: inline-block; text-align: center;">200%</span>
-                <button id="zoom-in" title="Zoom In (+)">+</button>
-                <button id="zoom-reset" title="Reset Zoom (0)">Reset</button>
-            </div>
-        </div>
+            <!-- Right Panel -->
+            <div class="right-panel">
+                <!-- Timeline Panel (placeholder for future animation) -->
+                <div class="timeline-panel">
+                    <div style="padding: 20px; text-align: center; color: #888; font-size: 11px;">
+                        <p>Animation Timeline</p>
+                        <p style="margin-top: 10px;">(Coming Soon)</p>
+                    </div>
+                </div>
 
-        <div class="info">
-            <span id="toolInfo">Tool: Line | Click to place points</span>
-        </div>
+                <!-- Side Panels -->
+                <div class="side-panels">
+                    <!-- Color Palette -->
+                    <div class="panel-box" style="flex-shrink: 0;">
+                        <h3>Color Palette</h3>
+                        <select id="palette-select" style="padding: 6px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer; margin-bottom: 8px; width: 100%;">
+                            <option value="16bit" selected>16-Bit Basic</option>
+                            <option value="tic80">TIC-80</option>
+                            <option value="pico8">Pico-8</option>
+                            <option value="gameboy">Game Boy</option>
+                            <option value="1bit">1-Bit (B&W)</option>
+                            <option value="lospec">Import from Lospec...</option>
+                        </select>
+                        <div class="color-palette" id="colorPalette"></div>
+                    </div>
 
-        <div class="shortcuts">
-            <h3>Keyboard Shortcuts</h3>
-            <ul>
-                <li><kbd>1-6</kbd> Select drawing tools</li>
-                <li><kbd>V</kbd> Select tool (move/edit)</li>
-                <li><kbd>F</kbd> Fill cell tool</li>
-                <li><kbd>Right-click</kbd> Add/remove nodes (select mode)</li>
-                <li><kbd>Ctrl+C</kbd> Copy selected shapes</li>
-                <li><kbd>Ctrl+V</kbd> Paste shapes</li>
-                <li><kbd>Del/Backspace</kbd> Delete shapes</li>
-                <li><kbd>]</kbd> Bring to front</li>
-                <li><kbd>[</kbd> Send to back</li>
-                <li><kbd>Ctrl+Z</kbd> Undo last shape</li>
-                <li><kbd>Ctrl+S</kbd> Save to file</li>
-                <li><kbd>H</kbd> Lock horizontal</li>
-                <li><kbd>G</kbd> Toggle grid display</li>
-                <li><kbd>O</kbd> Toggle outline mode</li>
-                <li><kbd>+</kbd> Zoom in</li>
-                <li><kbd>-</kbd> Zoom out</li>
-                <li><kbd>0</kbd> Reset zoom</li>
-                <li><kbd>ESC</kbd> Cancel current operation</li>
-                <li><kbd>Shift+Click</kbd> Multi-select shapes</li>
-            </ul>
-        </div>
-
-        <div class="info" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #0f3460;">
-            A tool from the Azirona Drift - <a href="https://azirona.com" target="_blank" style="color: #00d9ff; text-decoration: none;">azirona.com</a>
+                    <!-- Shape Order / History Tabs -->
+                    <div class="panel-box" style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
+                        <div class="tabs">
+                            <button class="tab active" data-tab="shapes">Shapes</button>
+                            <button class="tab" data-tab="history">History</button>
+                        </div>
+                        <div class="tab-content active" id="tab-shapes">
+                            <div style="display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid #1a1a2e;">
+                                <button id="tool-bring-front" title="Bring to Front (])" style="flex: 1; padding: 4px; font-size: 16px;">⬆⬆</button>
+                                <button id="tool-bring-forward" title="Bring Forward" style="flex: 1; padding: 4px; font-size: 16px;">⬆</button>
+                                <button id="tool-send-backward" title="Send Backward" style="flex: 1; padding: 4px; font-size: 16px;">⬇</button>
+                                <button id="tool-send-back" title="Send to Back ([)" style="flex: 1; padding: 4px; font-size: 16px;">⬇⬇</button>
+                            </div>
+                            <div class="shape-order-list" id="shapeOrderList"></div>
+                        </div>
+                        <div class="tab-content" id="tab-history">
+                            <div class="history-list" id="historyList"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -502,6 +728,36 @@
         </div>
     </div>
 
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal">
+        <div class="modal-content" style="min-width: 500px;">
+            <h3>Keyboard Shortcuts</h3>
+            <div style="columns: 2; font-size: 11px; line-height: 1.8;">
+                <div><kbd>1-6</kbd> Select drawing tools</div>
+                <div><kbd>V</kbd> Select tool (move/edit)</div>
+                <div><kbd>F</kbd> Fill cell tool</div>
+                <div><kbd>Right-click</kbd> Add/remove nodes</div>
+                <div><kbd>Ctrl+C</kbd> Copy selected shapes</div>
+                <div><kbd>Ctrl+V</kbd> Paste shapes</div>
+                <div><kbd>Del/Backspace</kbd> Delete shapes</div>
+                <div><kbd>]</kbd> Bring to front</div>
+                <div><kbd>[</kbd> Send to back</div>
+                <div><kbd>Ctrl+Z</kbd> Undo</div>
+                <div><kbd>Ctrl+S</kbd> Save to file</div>
+                <div><kbd>H</kbd> Lock horizontal</div>
+                <div><kbd>G</kbd> Toggle grid</div>
+                <div><kbd>O</kbd> Toggle outline</div>
+                <div><kbd>+</kbd> Zoom in</div>
+                <div><kbd>-</kbd> Zoom out</div>
+                <div><kbd>0</kbd> Reset zoom</div>
+                <div><kbd>ESC</kbd> Cancel operation</div>
+                <div><kbd>Shift+Click</kbd> Multi-select</div>
+            </div>
+            <div class="modal-buttons">
+                <button id="helpClose">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script src="editor.js"></script>
 </body>
-</html>
