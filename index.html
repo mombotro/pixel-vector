@@ -146,10 +146,89 @@
             padding: 10px;
         }
 
+        .preview-and-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+
+        .preview-panel {
+            width: 250px;
+            max-width: 100%;
+            background: #0f3460;
+            border-left: 2px solid #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            min-width: 150px;
+            padding: 10px;
+        }
+
+        .preview-panel h3 {
+            font-size: 11px;
+            color: #00d9ff;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+
+        .preview-mode-buttons {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+
+        .preview-mode-btn {
+            flex: 1;
+            background: #16213e;
+            color: #888;
+            border: 1px solid #533483;
+            padding: 5px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+        }
+
+        .preview-mode-btn.active {
+            background: #533483;
+            color: white;
+        }
+
+        .preview-mode-btn:hover {
+            background: #7b4fb8;
+            color: white;
+        }
+
+        .preview-container {
+            background: #1a1a2e;
+            border: 2px solid #533483;
+            border-radius: 4px;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 150px;
+            overflow: auto;
+            flex: 1;
+        }
+
+        .preview-container-inner {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        #previewCanvas {
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+            border: 1px solid #00d9ff;
+            box-shadow: 0 0 10px rgba(0, 217, 255, 0.3);
+        }
+
         .timeline-panel {
             width: 250px;
             max-width: 100%;
-            max-height: 100%;
             background: #0f3460;
             border-left: 2px solid #1a1a2e;
             display: flex;
@@ -158,6 +237,7 @@
             overflow: auto;
             min-width: 150px;
             min-height: 100px;
+            margin-top: 10px;
         }
 
         .side-panels {
@@ -600,18 +680,24 @@
                 <div class="dropdown">
                     <button class="dropdown-btn">File ▾</button>
                     <div class="dropdown-content">
-                        <button id="menu-save" title="Save (Ctrl+S)">Save</button>
+                        <button id="menu-save" title="Save (Ctrl+S)">Save (Ctrl+S)</button>
                         <button id="menu-load" title="Load">Load</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button id="menu-export-png" title="Export as PNG">Export as PNG</button>
+                        <button id="menu-export-jpg" title="Export as JPG">Export as JPG</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
                         <button id="menu-clear" title="Clear All">Clear</button>
                     </div>
                 </div>
                 <div class="dropdown">
                     <button class="dropdown-btn">Edit ▾</button>
                     <div class="dropdown-content">
-                        <button id="menu-undo" title="Undo (Ctrl+Z)">Undo</button>
-                        <button id="menu-copy" title="Copy (Ctrl+C)">Copy</button>
-                        <button id="menu-paste" title="Paste (Ctrl+V)">Paste</button>
-                        <button id="menu-delete" title="Delete (Del)">Delete</button>
+                        <button id="menu-undo" title="Undo (Ctrl+Z)">Undo (Ctrl+Z)</button>
+                        <button id="menu-redo" title="Redo (Ctrl+Y)">Redo (Ctrl+Y)</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button id="menu-copy" title="Copy (Ctrl+C)">Copy (Ctrl+C)</button>
+                        <button id="menu-paste" title="Paste (Ctrl+V)">Paste (Ctrl+V)</button>
+                        <button id="menu-delete" title="Delete (Del)">Delete (Del)</button>
                     </div>
                 </div>
                 <div class="dropdown">
@@ -620,14 +706,49 @@
                         <button id="view-left-panel">✓ Left Toolbar</button>
                         <button id="view-color-palette">✓ Color Palette</button>
                         <button id="view-shapes-panel">✓ Shapes/History</button>
+                        <button id="view-preview-panel">✓ Preview</button>
                         <button id="view-timeline-panel">✓ Timeline</button>
                         <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
-                        <button id="view-zen-mode">Zen Mode</button>
+                        <button id="view-toggle-grid">Toggle Grid (G)</button>
+                        <button id="view-toggle-outline">Toggle Outline (O)</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button id="view-zen-mode">Zen Mode (Z)</button>
                     </div>
+                </div>
+                <div class="dropdown">
+                    <button class="dropdown-btn">Canvas ▾</button>
+                    <div class="dropdown-content">
+                        <button disabled style="opacity: 0.6; cursor: default; font-weight: bold;">Ratio</button>
+                        <button id="canvas-ratio-1-1">● 1:1 (Square)</button>
+                        <button id="canvas-ratio-16-9">16:9</button>
+                        <button id="canvas-ratio-4-3">4:3</button>
+                        <button id="canvas-ratio-3-2">3:2</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button disabled style="opacity: 0.6; cursor: default; font-weight: bold;">Orientation</button>
+                        <button id="canvas-orientation-landscape">● Landscape</button>
+                        <button id="canvas-orientation-portrait">Portrait</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button disabled style="opacity: 0.6; cursor: default; font-weight: bold;">Grid</button>
+                        <button id="canvas-grid-off">Off</button>
+                        <button id="canvas-grid-8">● 8×8</button>
+                        <button id="canvas-grid-16">16×16</button>
+                        <button id="canvas-grid-32">32×32</button>
+                        <button id="canvas-grid-64">64×64</button>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-left: 10px;">
+                    <span style="color: #00d9ff; font-size: 11px;">Zoom:</span>
+                    <input type="number" id="zoom-percentage" min="50" max="500" step="50" value="100" style="width: 60px; padding: 4px; background: #16213e; border: 1px solid #533483; border-radius: 3px; color: #fff; font-family: 'Courier New', monospace; font-size: 11px;" title="Zoom percentage">
+                    <span style="color: #888; font-size: 11px;">%</span>
+                    <input type="range" id="zoom-slider" min="1" max="10" step="1" value="2" style="width: 100px; cursor: pointer;" title="Zoom slider">
+                    <button id="zoom-preset-50" style="padding: 4px 8px; font-size: 10px;" title="50% zoom">50%</button>
+                    <button id="zoom-preset-100" style="padding: 4px 8px; font-size: 10px;" title="100% zoom">100%</button>
+                    <button id="zoom-preset-200" style="padding: 4px 8px; font-size: 10px;" title="200% zoom">200%</button>
+                    <button id="zoom-preset-400" style="padding: 4px 8px; font-size: 10px;" title="400% zoom">400%</button>
                 </div>
             </div>
             <div style="display: flex; align-items: center; gap: 10px;">
-                <a href="https://ko-fi.com/A0A2CFZ3G" target="_blank" class="kofi-btn">☕ Buy me a Mtn Dew</a>
+                <a href="https://ko-fi.com/A0A2CFZ3G" target="_blank" class="kofi-btn">☕ Buy us a Mtn Dew</a>
                 <button class="help-btn" id="helpBtn">Help</button>
             </div>
         </div>
@@ -639,24 +760,67 @@
                 <div class="tool-section">
                     <h3>Draw</h3>
                     <div class="tool-group">
-                        <button id="tool-line" class="tool-btn active" title="Line (1)">Line</button>
-                        <button id="tool-rect" class="tool-btn" title="Rectangle (2)">Rect</button>
-                        <button id="tool-circle" class="tool-btn" title="Circle (3)">Circle</button>
-                        <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval</button>
-                        <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Triangle</button>
-                        <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Polygon</button>
-                        <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill</button>
-                        <button id="tool-select" class="tool-btn" title="Select (V)">Select</button>
+                        <button id="tool-line" class="tool-btn active" title="Line (1)">Line (1)</button>
+                        <button id="tool-rect" class="tool-btn" title="Rectangle (2)">Rect (2)</button>
+                        <button id="tool-circle" class="tool-btn" title="Circle (3)">Circle (3)</button>
+                        <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval (4)</button>
+                        <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Triangle (5)</button>
+                        <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Polygon (6)</button>
+                        <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill (F)</button>
+                        <button id="tool-select" class="tool-btn" title="Select (V)">Select (V)</button>
                     </div>
                 </div>
 
                 <div class="tool-section">
                     <h3>Boolean</h3>
                     <div class="tool-group">
-                        <button id="tool-union" title="Union">Union</button>
-                        <button id="tool-subtract" title="Subtract">Subtract</button>
-                        <button id="tool-intersect" title="Intersect">Intersect</button>
-                        <button id="tool-to-polygon" title="To Polygon">To Poly</button>
+                        <button id="tool-union" title="Union (Ctrl+Shift+U)">Union</button>
+                        <button id="tool-subtract" title="Subtract (Ctrl+Shift+B)">Subtract</button>
+                        <button id="tool-intersect" title="Intersect (Ctrl+Shift+I)">Intersect</button>
+                        <button id="tool-to-polygon" title="To Polygon (Ctrl+Shift+P)">To Poly</button>
+                    </div>
+                </div>
+
+                <div class="tool-section">
+                    <h3>Nodes</h3>
+                    <div class="tool-group">
+                        <button id="tool-union-nodes" title="Merge Nodes (Ctrl+Shift+M)">Merge Nodes</button>
+                    </div>
+                </div>
+
+                <div class="tool-section">
+                    <h3>Dither</h3>
+                    <div style="margin-bottom: 8px;">
+                        <select id="dither-pattern-select" style="width: 100%; padding: 6px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer; margin-bottom: 8px;">
+                            <option value="0">Pattern 1 (Solid)</option>
+                            <option value="1">Pattern 2 (Light)</option>
+                            <option value="2">Pattern 3</option>
+                            <option value="3">Pattern 4</option>
+                            <option value="4">Pattern 5</option>
+                            <option value="5">Pattern 6</option>
+                            <option value="6">Pattern 7</option>
+                            <option value="7">Pattern 8</option>
+                            <option value="8">Pattern 9</option>
+                            <option value="9">Pattern 10</option>
+                            <option value="10">Pattern 11</option>
+                            <option value="11">Pattern 12</option>
+                            <option value="12">Pattern 13</option>
+                            <option value="13">Pattern 14</option>
+                            <option value="14">Pattern 15</option>
+                            <option value="15">Pattern 16</option>
+                            <option value="16">Pattern 17</option>
+                            <option value="17">Pattern 18</option>
+                            <option value="18">Pattern 19 (Dense)</option>
+                        </select>
+                        <canvas id="ditherPatternPreview" width="64" height="64" style="width: 100%; height: auto; border: 1px solid #533483; image-rendering: pixelated; background: #1a1a2e;"></canvas>
+                    </div>
+                    <div style="margin-bottom: 8px;">
+                        <label for="dither-scale" style="display: block; margin-bottom: 4px; font-size: 12px; color: #e94560;">Scale: <span id="dither-scale-value">1</span>x</label>
+                        <input type="range" id="dither-scale" min="1" max="8" value="1" step="1" style="width: 100%;">
+                    </div>
+                    <div class="tool-group">
+                        <button id="tool-apply-dither" title="Apply Dither Pattern">Apply Dither</button>
+                        <button id="tool-clear-dither" title="Clear Dither Pattern">Clear Dither</button>
                     </div>
                 </div>
             </div>
@@ -668,11 +832,27 @@
 
             <!-- Right Panel -->
             <div class="right-panel">
-                <!-- Timeline Panel (placeholder for future animation) -->
-                <div class="timeline-panel">
-                    <div style="padding: 20px; text-align: center; color: #888; font-size: 11px;">
-                        <p>Animation Timeline</p>
-                        <p style="margin-top: 10px;">(Coming Soon)</p>
+                <!-- Preview Panel -->
+                <div class="preview-and-timeline">
+                    <div class="preview-panel">
+                        <h3>Preview <span id="preview-size" style="font-size: 9px; color: #888; font-weight: normal;"></span></h3>
+                        <div class="preview-mode-buttons">
+                            <button class="preview-mode-btn active" id="preview-actual">1:1</button>
+                            <button class="preview-mode-btn" id="preview-repeat">Repeat</button>
+                        </div>
+                        <div class="preview-container">
+                            <div class="preview-container-inner">
+                                <canvas id="previewCanvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Timeline Panel (placeholder for future animation) -->
+                    <div class="timeline-panel">
+                        <div style="padding: 20px; text-align: center; color: #888; font-size: 11px;">
+                            <p>Animation Timeline</p>
+                            <p style="margin-top: 10px;">(Coming Soon)</p>
+                        </div>
                     </div>
                 </div>
 
@@ -742,11 +922,16 @@
                 <div><kbd>Del/Backspace</kbd> Delete shapes</div>
                 <div><kbd>]</kbd> Bring to front</div>
                 <div><kbd>[</kbd> Send to back</div>
+                <div><kbd>Ctrl+Shift+U</kbd> Union</div>
+                <div><kbd>Ctrl+Shift+B</kbd> Subtract</div>
+                <div><kbd>Ctrl+Shift+I</kbd> Intersect</div>
+                <div><kbd>Ctrl+Shift+P</kbd> To Polygon</div>
                 <div><kbd>Ctrl+Z</kbd> Undo</div>
                 <div><kbd>Ctrl+S</kbd> Save to file</div>
                 <div><kbd>H</kbd> Lock horizontal</div>
                 <div><kbd>G</kbd> Toggle grid</div>
                 <div><kbd>O</kbd> Toggle outline</div>
+                <div><kbd>Z</kbd> Zen mode</div>
                 <div><kbd>+</kbd> Zoom in</div>
                 <div><kbd>-</kbd> Zoom out</div>
                 <div><kbd>0</kbd> Reset zoom</div>
@@ -755,6 +940,28 @@
             </div>
             <div class="modal-buttons">
                 <button id="helpClose">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export Options Modal -->
+    <div id="exportModal" class="modal" style="display: none;">
+        <div class="modal-content" style="max-width: 400px;">
+            <h2 id="exportModalTitle">Export Options</h2>
+            <div style="margin: 20px 0;">
+                <label style="display: block; margin-bottom: 10px;">
+                    <span style="display: block; margin-bottom: 5px; color: #e94560;">Scale:</span>
+                    <input type="number" id="exportScale" min="1" max="16" value="1" style="width: 100%; padding: 8px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px;">
+                    <span style="display: block; margin-top: 5px; font-size: 12px; color: #888;">Final size: <span id="exportSize">480 × 272</span> pixels</span>
+                </label>
+                <label style="display: block; margin-top: 15px; cursor: pointer;" id="exportTransparencyOption">
+                    <input type="checkbox" id="exportTransparent" style="margin-right: 8px;">
+                    <span>Transparent background</span>
+                </label>
+            </div>
+            <div class="modal-buttons">
+                <button id="exportConfirm" style="background: #e94560;">Export</button>
+                <button id="exportCancel">Cancel</button>
             </div>
         </div>
     </div>

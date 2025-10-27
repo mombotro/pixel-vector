@@ -53,6 +53,7 @@ class VectorEditor {
         this.selectedShape = null;
         this.selectedShapes = []; // Multiple selected shapes
         this.selectedPoint = null;
+        this.selectedPoints = []; // Multiple selected points/nodes
         this.copiedShape = null;
         this.copiedShapes = []; // Multiple copied shapes
         this.isDragging = false;
@@ -75,6 +76,7 @@ class VectorEditor {
         // Grid settings
         this.gridCells = 32; // 0 = off, 8 = 8x8 cells, 16 = 16x16 cells, etc.
         this.showGrid = false;
+        this.showSelectionNodes = true; // Show selection nodes during normal editing
 
         // Canvas settings
         this.aspectRatio = '1:1';  // Current aspect ratio
@@ -88,6 +90,19 @@ class VectorEditor {
         this.mouseX = 0;
         this.mouseY = 0;
         this.mouseDown = false;
+        this.shapeWasModified = false; // Track if shapes were actually moved/changed
+
+        // Preview settings
+        this.previewMode = 'actual'; // 'actual' or 'repeat'
+        this.previewCanvas = null;
+        this.previewCtx = null;
+
+        // Dither settings
+        this.ditherImage = null;
+        this.ditherPatterns = [];
+        this.selectedDitherPattern = 0;
+        this.ditherPatternSize = 8; // Each pattern is 8x8 pixels in the atlas
+        this.ditherScale = 1; // Scale multiplier for dither patterns
 
         this.init();
     }
@@ -96,7 +111,273 @@ class VectorEditor {
         this.setupColorPalette();
         this.setupEventListeners();
         this.updateCanvasDimensions();
+        this.setupPreview();
+        this.setupDither();
         this.render();
+    }
+
+    setupPreview() {
+        this.previewCanvas = document.getElementById('previewCanvas');
+        if (this.previewCanvas) {
+            this.previewCtx = this.previewCanvas.getContext('2d');
+            this.updatePreview();
+        }
+    }
+
+    setupDither() {
+        // Create dither patterns programmatically to avoid CORS issues
+        this.createDitherPatterns();
+        this.updateDitherPreview();
+
+        // Setup event listeners for dither controls
+        const ditherSelect = document.getElementById('dither-pattern-select');
+        if (ditherSelect) {
+            ditherSelect.addEventListener('change', (e) => {
+                this.selectedDitherPattern = parseInt(e.target.value);
+                this.updateDitherPreview();
+            });
+        }
+
+        const ditherScaleSlider = document.getElementById('dither-scale');
+        const ditherScaleValue = document.getElementById('dither-scale-value');
+        if (ditherScaleSlider && ditherScaleValue) {
+            ditherScaleSlider.addEventListener('input', (e) => {
+                this.ditherScale = parseInt(e.target.value);
+                ditherScaleValue.textContent = this.ditherScale;
+                this.render(); // Re-render to show new scale
+            });
+        }
+
+        document.getElementById('tool-apply-dither')?.addEventListener('click', () => {
+            this.applyDitherToSelection();
+        });
+
+        document.getElementById('tool-clear-dither')?.addEventListener('click', () => {
+            this.clearDitherFromSelection();
+        });
+    }
+
+    createDitherPatterns() {
+        // Create 19 common dither patterns as 8x8 ImageData
+        const patterns = [
+            // Pattern 0: Solid (100%)
+            [1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1],
+            // Pattern 1: Very light (87.5%)
+            [1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,0],
+            // Pattern 2: Light (75%)
+            [1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,1],
+            // Pattern 3: Light checkerboard (62.5%)
+            [1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,0, 1,1,1,1,1,1,1,1, 1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,0, 1,1,1,1,1,1,1,1, 1,1,1,0,1,1,1,1, 1,1,1,1,1,1,1,0],
+            // Pattern 4: Diagonal lines (50%)
+            [1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1],
+            // Pattern 5: Checkerboard (50%)
+            [1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1],
+            // Pattern 6: Vertical lines (50%)
+            [1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0, 1,0,1,0,1,0,1,0],
+            // Pattern 7: Horizontal lines (50%)
+            [1,1,1,1,1,1,1,1, 0,0,0,0,0,0,0,0, 1,1,1,1,1,1,1,1, 0,0,0,0,0,0,0,0, 1,1,1,1,1,1,1,1, 0,0,0,0,0,0,0,0, 1,1,1,1,1,1,1,1, 0,0,0,0,0,0,0,0],
+            // Pattern 8: Diagonal (other way) (50%)
+            [0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0, 0,1,0,1,0,1,0,1, 1,0,1,0,1,0,1,0],
+            // Pattern 9: Sparse diagonal (37.5%)
+            [1,0,0,0,1,0,0,0, 0,0,1,0,0,0,1,0, 0,1,0,0,0,1,0,0, 0,0,0,1,0,0,0,1, 1,0,0,0,1,0,0,0, 0,0,1,0,0,0,1,0, 0,1,0,0,0,1,0,0, 0,0,0,1,0,0,0,1],
+            // Pattern 10: Dark checkerboard (37.5%)
+            [0,1,0,0,0,1,0,0, 1,0,0,0,1,0,0,0, 0,0,0,1,0,0,0,1, 0,0,1,0,0,0,1,0, 0,1,0,0,0,1,0,0, 1,0,0,0,1,0,0,0, 0,0,0,1,0,0,0,1, 0,0,1,0,0,0,1,0],
+            // Pattern 11: Cross hatch (25%)
+            [1,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,0,1,0,0,0,1,0, 0,0,0,0,0,0,0,0, 1,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,0,1,0,0,0,1,0, 0,0,0,0,0,0,0,0],
+            // Pattern 12: Sparse (25%)
+            [1,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,0,1,0,0,0,1,0, 0,0,0,0,0,0,0,0, 1,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,0,1,0,0,0,1,0, 0,0,0,0,0,0,0,0],
+            // Pattern 13: Bayer 2x2 (25%)
+            [1,0,0,0,1,0,0,0, 0,0,1,0,0,0,1,0, 0,1,0,0,0,1,0,0, 0,0,0,0,0,0,0,0, 1,0,0,0,1,0,0,0, 0,0,1,0,0,0,1,0, 0,1,0,0,0,1,0,0, 0,0,0,0,0,0,0,0],
+            // Pattern 14: Very sparse (12.5%)
+            [1,0,0,0,0,0,0,0, 0,0,0,0,1,0,0,0, 0,0,1,0,0,0,0,0, 0,0,0,0,0,0,1,0, 0,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,1,0,0,0,0,0,0, 0,0,0,0,0,1,0,0],
+            // Pattern 15: Dots (12.5%)
+            [0,0,0,0,1,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 1,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,1],
+            // Pattern 16: Very very sparse (6.25%)
+            [1,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,1,0,0,0],
+            // Pattern 17: Almost empty (3.125%)
+            [1,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0],
+            // Pattern 18: Empty (0%)
+            [0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0],
+        ];
+
+        this.ditherPatterns = [];
+        patterns.forEach(pattern => {
+            const imageData = new ImageData(8, 8);
+            for (let i = 0; i < 64; i++) {
+                const value = pattern[i] ? 255 : 0;
+                imageData.data[i * 4] = value;
+                imageData.data[i * 4 + 1] = value;
+                imageData.data[i * 4 + 2] = value;
+                imageData.data[i * 4 + 3] = 255;
+            }
+            this.ditherPatterns.push(imageData);
+        });
+
+        console.log('Created', this.ditherPatterns.length, 'dither patterns');
+    }
+
+    updateDitherPreview() {
+        const preview = document.getElementById('ditherPatternPreview');
+        if (!preview || !this.ditherPatterns || this.ditherPatterns.length === 0) return;
+
+        const ctx = preview.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+
+        // Draw the selected pattern tiled to fill the preview
+        const patternSize = 8;
+        ctx.clearRect(0, 0, preview.width, preview.height);
+
+        const pattern = this.ditherPatterns[this.selectedDitherPattern];
+        if (!pattern) return;
+
+        // Draw selected pattern repeated (8x8 tiled)
+        for (let ty = 0; ty < 8; ty++) {
+            for (let tx = 0; tx < 8; tx++) {
+                ctx.putImageData(pattern, tx * 8, ty * 8);
+            }
+        }
+    }
+
+    applyDitherToSelection() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one shape to apply dither');
+            return;
+        }
+
+        console.log('Applying dither pattern', this.selectedDitherPattern, 'to', this.selectedShapes.length, 'shapes');
+
+        this.selectedShapes.forEach(shape => {
+            shape.ditherPattern = this.selectedDitherPattern;
+            console.log('Applied dither to shape:', shape.type, 'ditherPattern:', shape.ditherPattern);
+        });
+
+        this.saveHistory();
+        this.updateShapeOrderPreview();
+        this.render();
+    }
+
+    clearDitherFromSelection() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one shape to clear dither');
+            return;
+        }
+
+        this.selectedShapes.forEach(shape => {
+            delete shape.ditherPattern;
+        });
+
+        this.saveHistory();
+        this.render();
+    }
+
+    applyDitherPattern(x, y, color, ditherPatternIndex) {
+        if (ditherPatternIndex === undefined || ditherPatternIndex === null || !this.ditherPatterns[ditherPatternIndex]) {
+            // No dither pattern, draw solid color
+            this.ctx.fillStyle = color;
+            this.ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
+            return;
+        }
+
+        const pattern = this.ditherPatterns[ditherPatternIndex];
+        if (!pattern) {
+            console.warn('Dither pattern', ditherPatternIndex, 'not found');
+            this.ctx.fillStyle = color;
+            this.ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
+            return;
+        }
+
+        const patternSize = 8;
+        const scaledPatternSize = patternSize * this.ditherScale;
+
+        // Get the pattern pixel at this position, accounting for scale
+        const px = Math.floor(Math.floor(x) / this.ditherScale) % patternSize;
+        const py = Math.floor(Math.floor(y) / this.ditherScale) % patternSize;
+        const patternIndex = (py * patternSize + px) * 4;
+
+        // Check if this pixel in the pattern is "on" (white/light)
+        const r = pattern.data[patternIndex];
+        const isOn = r > 128;
+
+        if (isOn) {
+            this.ctx.fillStyle = color;
+            this.ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
+        }
+        // If off, don't draw (leave transparent or background)
+    }
+
+    updatePreview() {
+        if (!this.previewCanvas || !this.previewCtx) return;
+
+        const previewSizeLabel = document.getElementById('preview-size');
+
+        // Determine the actual pixel resolution based on grid
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        if (this.previewMode === 'actual') {
+            // Show at actual pixel size (e.g., 32×32 for a 32×32 grid)
+            this.previewCanvas.width = actualWidth;
+            this.previewCanvas.height = actualHeight;
+
+            // Update size label
+            if (previewSizeLabel) {
+                previewSizeLabel.textContent = `(${actualWidth}×${actualHeight}px)`;
+            }
+
+            // Draw background
+            this.previewCtx.fillStyle = this.backgroundColor;
+            this.previewCtx.fillRect(0, 0, actualWidth, actualHeight);
+
+            // Scale down from canvas coordinates to pixel coordinates
+            const scaleX = actualWidth / this.canvasWidth;
+            const scaleY = actualHeight / this.canvasHeight;
+
+            this.previewCtx.save();
+            this.previewCtx.scale(scaleX, scaleY);
+
+            // Draw all shapes scaled down to pixel size
+            this.shapes.forEach(shape => {
+                this.drawShape(shape, this.previewCtx, 1);
+            });
+
+            this.previewCtx.restore();
+        } else if (this.previewMode === 'repeat') {
+            // Show repeating pattern (3x3 grid)
+            const repeatWidth = actualWidth * 3;
+            const repeatHeight = actualHeight * 3;
+            this.previewCanvas.width = repeatWidth;
+            this.previewCanvas.height = repeatHeight;
+
+            // Update size label
+            if (previewSizeLabel) {
+                previewSizeLabel.textContent = `(${repeatWidth}×${repeatHeight}px)`;
+            }
+
+            // Scale factor to convert canvas coordinates to pixel coordinates
+            const scaleX = actualWidth / this.canvasWidth;
+            const scaleY = actualHeight / this.canvasHeight;
+
+            // Draw 3x3 grid of the canvas
+            for (let y = 0; y < 3; y++) {
+                for (let x = 0; x < 3; x++) {
+                    const offsetX = x * actualWidth;
+                    const offsetY = y * actualHeight;
+
+                    // Draw background
+                    this.previewCtx.fillStyle = this.backgroundColor;
+                    this.previewCtx.fillRect(offsetX, offsetY, actualWidth, actualHeight);
+
+                    // Draw all shapes with offset and scaling
+                    this.previewCtx.save();
+                    this.previewCtx.translate(offsetX, offsetY);
+                    this.previewCtx.scale(scaleX, scaleY);
+                    this.shapes.forEach(shape => {
+                        this.drawShape(shape, this.previewCtx, 1);
+                    });
+                    this.previewCtx.restore();
+                }
+            }
+        }
     }
 
     setupColorPalette() {
@@ -236,6 +517,9 @@ class VectorEditor {
         // Convert to polygon button
         document.getElementById('tool-to-polygon').addEventListener('click', () => this.convertToPolygon());
 
+        // Union nodes button
+        document.getElementById('tool-union-nodes').addEventListener('click', () => this.unionNodes());
+
         // Grid dropdown (if exists)
         const gridSize = document.getElementById('grid-size');
         if (gridSize) {
@@ -331,6 +615,36 @@ class VectorEditor {
         const zoomReset = document.getElementById('zoom-reset');
         if (zoomReset) zoomReset.addEventListener('click', () => this.zoomReset());
 
+        // New zoom controls
+        const zoomPercentage = document.getElementById('zoom-percentage');
+        if (zoomPercentage) {
+            zoomPercentage.addEventListener('change', (e) => {
+                const percentage = parseInt(e.target.value);
+                this.setZoomPercentage(percentage);
+            });
+        }
+
+        const zoomSlider = document.getElementById('zoom-slider');
+        if (zoomSlider) {
+            zoomSlider.addEventListener('input', (e) => {
+                this.scale = parseInt(e.target.value);
+                this.updateCanvasScale();
+            });
+        }
+
+        // Zoom presets
+        const zoomPreset50 = document.getElementById('zoom-preset-50');
+        if (zoomPreset50) zoomPreset50.addEventListener('click', () => this.setZoomPercentage(50));
+
+        const zoomPreset100 = document.getElementById('zoom-preset-100');
+        if (zoomPreset100) zoomPreset100.addEventListener('click', () => this.setZoomPercentage(100));
+
+        const zoomPreset200 = document.getElementById('zoom-preset-200');
+        if (zoomPreset200) zoomPreset200.addEventListener('click', () => this.setZoomPercentage(200));
+
+        const zoomPreset400 = document.getElementById('zoom-preset-400');
+        if (zoomPreset400) zoomPreset400.addEventListener('click', () => this.setZoomPercentage(400));
+
         // Scroll wheel zoom
         this.canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
@@ -360,13 +674,34 @@ class VectorEditor {
         this.updateCanvasScale();
     }
 
+    setZoomPercentage(percentage) {
+        // Convert percentage to scale (percentage / 50 = scale)
+        this.scale = Math.max(1, Math.min(10, percentage / 50));
+        this.updateCanvasScale();
+    }
+
     updateCanvasScale() {
         this.canvas.width = this.canvasWidth * this.scale;
         this.canvas.height = this.canvasHeight * this.scale;
+        const percentage = Math.round(this.scale * 50);
+
+        // Update old zoom level display
         const zoomLevel = document.getElementById('zoom-level');
         if (zoomLevel) {
-            zoomLevel.textContent = `${Math.round(this.scale * 50)}%`;
+            zoomLevel.textContent = `${percentage}%`;
         }
+
+        // Update new zoom controls
+        const zoomPercentage = document.getElementById('zoom-percentage');
+        if (zoomPercentage) {
+            zoomPercentage.value = percentage;
+        }
+
+        const zoomSlider = document.getElementById('zoom-slider');
+        if (zoomSlider) {
+            zoomSlider.value = this.scale;
+        }
+
         this.render();
     }
 
@@ -523,6 +858,7 @@ class VectorEditor {
             if (this.dragMode === 'point' && this.selectedPoint) {
                 this.selectedPoint.x = pos.x;
                 this.selectedPoint.y = pos.y;
+                this.shapeWasModified = true;
             } else if (this.dragMode === 'shape') {
                 const dx = pos.x - this.lastMouseX;
                 const dy = pos.y - this.lastMouseY;
@@ -533,6 +869,7 @@ class VectorEditor {
                         p.y += dy;
                     });
                 });
+                this.shapeWasModified = true;
             } else if (this.dragMode === 'selection-box' && this.selectionBox) {
                 // Update selection box
                 this.selectionBox.x2 = pos.x;
@@ -569,15 +906,22 @@ class VectorEditor {
             this.render();
         }
 
+        // Save history only if shapes were actually modified (moved, resized, etc.)
+        if (this.shapeWasModified && this.isDragging && (this.dragMode === 'point' || this.dragMode === 'shape')) {
+            this.saveHistory();
+            this.updateShapeOrderPreview();
+        }
+
         this.mouseDown = false;
         this.isDragging = false;
         this.dragMode = null;
+        this.shapeWasModified = false;
     }
 
     handleLeftClick(pos, shiftKey = false) {
         if (this.currentTool === 'select') {
             // Try to select a node first (higher priority) - only if single shape selected
-            if (this.selectedShapes.length <= 1 && this.trySelectNode(pos)) {
+            if (this.selectedShapes.length <= 1 && this.trySelectNode(pos, shiftKey)) {
                 return;
             }
 
@@ -617,6 +961,8 @@ class VectorEditor {
                 this.dragMode = 'selection-box';
                 this.selectedShapes = [];
                 this.selectedShape = null;
+                this.selectedPoint = null;
+                this.selectedPoints = [];
                 this.render();
             }
             return;
@@ -697,6 +1043,8 @@ class VectorEditor {
         }
 
         this.render();
+        this.saveHistory();
+        this.updateShapeOrderPreview();
     }
 
     removeNode(nodeIndex) {
@@ -719,15 +1067,20 @@ class VectorEditor {
         shape.points.splice(nodeIndex, 1);
         this.selectedPoint = null;
         this.render();
+        this.saveHistory();
+        this.updateShapeOrderPreview();
     }
 
-    trySelectNode(pos) {
+    trySelectNode(pos, shiftKey = false) {
         // Find closest point within threshold
         let closestDist = Infinity;
         let closestPoint = null;
         let closestShape = null;
 
-        for (const shape of this.shapes) {
+        // Only search within the currently selected shape if one is selected
+        const searchShapes = this.selectedShape ? [this.selectedShape] : this.shapes;
+
+        for (const shape of searchShapes) {
             for (const point of shape.points) {
                 const dist = Math.sqrt((point.x - pos.x) ** 2 + (point.y - pos.y) ** 2);
                 if (dist < closestDist && dist < 10) {
@@ -739,10 +1092,24 @@ class VectorEditor {
         }
 
         if (closestPoint) {
-            this.selectedPoint = closestPoint;
-            this.selectedShape = closestShape;
-            this.isDragging = true;
-            this.dragMode = 'point';
+            if (shiftKey) {
+                // Multi-select nodes: toggle point in selection
+                const index = this.selectedPoints.indexOf(closestPoint);
+                if (index === -1) {
+                    this.selectedPoints.push(closestPoint);
+                } else {
+                    this.selectedPoints.splice(index, 1);
+                }
+                this.selectedPoint = this.selectedPoints.length === 1 ? this.selectedPoints[0] : null;
+                this.selectedShape = closestShape;
+            } else {
+                // Single select
+                this.selectedPoint = closestPoint;
+                this.selectedPoints = [closestPoint];
+                this.selectedShape = closestShape;
+                this.isDragging = true;
+                this.dragMode = 'point';
+            }
             this.render();
             return true;
         }
@@ -813,8 +1180,12 @@ class VectorEditor {
         // Remove any history after current index (for redo)
         this.history = this.history.slice(0, this.historyIndex + 1);
 
-        // Save current state
-        this.history.push(JSON.parse(JSON.stringify(this.shapes)));
+        // Save current state with canvas dimensions
+        this.history.push({
+            shapes: JSON.parse(JSON.stringify(this.shapes)),
+            canvasWidth: this.canvasWidth,
+            canvasHeight: this.canvasHeight
+        });
 
         // Limit history size
         if (this.history.length > this.maxHistory) {
@@ -1225,7 +1596,21 @@ class VectorEditor {
                 return;
             }
 
-            // Rasterize the shape and convert to polygon
+            // For lines, convert directly to a rectangular polygon
+            if (shape.type === 'line' && shape.points.length === 2) {
+                const linePolygon = this.lineToPolygon(shape);
+                if (linePolygon) {
+                    convertedShapes.push(linePolygon);
+                    // Remove original shape
+                    const index = this.shapes.indexOf(shape);
+                    if (index > -1) {
+                        this.shapes.splice(index, 1);
+                    }
+                }
+                return;
+            }
+
+            // For other shapes, rasterize and convert to polygon
             const pixels = this.rasterizeShapesToPixels([shape]);
             const newShape = this.pixelsToPolygon(pixels, shape.color);
 
@@ -1252,10 +1637,100 @@ class VectorEditor {
         this.render();
     }
 
+    unionNodes() {
+        // Check if we have multiple nodes selected within a single shape
+        if (this.selectedPoints.length >= 2 && this.selectedShape) {
+            // Merge selected nodes within the shape
+            if (!this.selectedShape.points) {
+                alert('Selected shape has no points');
+                return;
+            }
+
+            // Calculate the average position of all selected points
+            const avgX = this.selectedPoints.reduce((sum, p) => sum + p.x, 0) / this.selectedPoints.length;
+            const avgY = this.selectedPoints.reduce((sum, p) => sum + p.y, 0) / this.selectedPoints.length;
+
+            // Find the first selected point in the shape's points array
+            let firstIndex = -1;
+            for (let i = 0; i < this.selectedShape.points.length; i++) {
+                if (this.selectedPoints.includes(this.selectedShape.points[i])) {
+                    firstIndex = i;
+                    break;
+                }
+            }
+
+            if (firstIndex === -1) {
+                alert('Could not find selected points in shape');
+                return;
+            }
+
+            // Replace the first selected point with the averaged position
+            this.selectedShape.points[firstIndex] = { x: avgX, y: avgY };
+
+            // Remove all other selected points from the shape
+            this.selectedShape.points = this.selectedShape.points.filter(p => {
+                return !this.selectedPoints.includes(p) || p === this.selectedShape.points[firstIndex];
+            });
+
+            // Update selection to the merged point
+            this.selectedPoint = this.selectedShape.points[firstIndex];
+            this.selectedPoints = [this.selectedPoint];
+
+            this.saveHistory();
+            this.updateShapeOrderPreview();
+            this.render();
+        } else {
+            alert('Select at least 2 nodes within a shape (use Shift+Click)');
+        }
+    }
+
+    lineToPolygon(lineShape) {
+        const p1 = lineShape.points[0];
+        const p2 = lineShape.points[1];
+        const width = lineShape.lineWidth || 1;
+
+        // Calculate perpendicular vector for line width
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+
+        if (length === 0) return null;
+
+        // Perpendicular unit vector
+        const perpX = -dy / length;
+        const perpY = dx / length;
+
+        // Half width offset
+        const halfWidth = width / 2;
+
+        // Create rectangle around the line
+        const points = [
+            { x: p1.x + perpX * halfWidth, y: p1.y + perpY * halfWidth },
+            { x: p2.x + perpX * halfWidth, y: p2.y + perpY * halfWidth },
+            { x: p2.x - perpX * halfWidth, y: p2.y - perpY * halfWidth },
+            { x: p1.x - perpX * halfWidth, y: p1.y - perpY * halfWidth }
+        ];
+
+        return {
+            type: 'polygon',
+            points: points,
+            color: lineShape.color,
+            lineWidth: 1,
+            outline: lineShape.outline || false
+        };
+    }
+
     rasterizeShapesToPixels(shapes) {
         const pixels = new Set();
 
         shapes.forEach(shape => {
+            // For lines, convert to polygon first to preserve shape
+            let shapeToRasterize = shape;
+            if (shape.type === 'line' && shape.points.length === 2) {
+                shapeToRasterize = this.lineToPolygon(shape);
+                if (!shapeToRasterize) return;
+            }
+
             // Temporarily create a test canvas to rasterize the shape
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.canvasWidth;
@@ -1269,14 +1744,14 @@ class VectorEditor {
             this.scale = 1;
 
             // Force shape to be filled (not outline) for boolean operations
-            const originalOutline = shape.outline;
-            shape.outline = false;
+            const originalOutline = shapeToRasterize.outline;
+            shapeToRasterize.outline = false;
 
             // Draw the shape
-            this.drawShape(shape, false);
+            this.drawShape(shapeToRasterize, false);
 
             // Restore outline property
-            shape.outline = originalOutline;
+            shapeToRasterize.outline = originalOutline;
 
             // Get pixel data
             const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
@@ -1335,6 +1810,179 @@ class VectorEditor {
             lineWidth: 1,
             outline: false
         };
+    }
+
+    findAllContours(grid, offsetX, offsetY) {
+        const height = grid.length;
+        const width = grid[0].length;
+        const visited = Array(height).fill(0).map(() => Array(width).fill(false));
+        const contours = [];
+
+        // First pass: find the main outer contour (largest filled region)
+        let largestContour = null;
+        let largestArea = 0;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                if (grid[y][x] === 1 && !visited[y][x]) {
+                    const region = this.getRegionPixels(grid, visited, x, y, 1);
+                    if (region.size > largestArea) {
+                        largestArea = region.size;
+                        largestContour = this.marchingSquaresFromRegion(grid, region, offsetX, offsetY);
+                    }
+                }
+            }
+        }
+
+        if (largestContour && largestContour.length >= 3) {
+            contours.push(largestContour);
+        }
+
+        // Reset visited for hole detection
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                visited[y][x] = false;
+            }
+        }
+
+        // Second pass: find holes (empty regions surrounded by filled pixels)
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                if (grid[y][x] === 0 && !visited[y][x]) {
+                    if (this.isHole(grid, x, y)) {
+                        const region = this.getRegionPixels(grid, visited, x, y, 0);
+                        const holeContour = this.marchingSquaresFromRegion(grid, region, offsetX, offsetY, true);
+                        if (holeContour && holeContour.length >= 3) {
+                            contours.push(holeContour);
+                        }
+                    } else {
+                        // Mark as visited
+                        this.floodFillVisited(grid, visited, x, y, 0);
+                    }
+                }
+            }
+        }
+
+        return contours;
+    }
+
+    getRegionPixels(grid, visited, startX, startY, value) {
+        const height = grid.length;
+        const width = grid[0].length;
+        const region = new Set();
+        const queue = [{x: startX, y: startY}];
+        visited[startY][startX] = true;
+
+        while (queue.length > 0) {
+            const {x, y} = queue.shift();
+            region.add(`${x},${y}`);
+
+            const neighbors = [{x: x-1, y}, {x: x+1, y}, {x, y: y-1}, {x, y: y+1}];
+            for (const {x: nx, y: ny} of neighbors) {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height &&
+                    grid[ny][nx] === value && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({x: nx, y: ny});
+                }
+            }
+        }
+
+        return region;
+    }
+
+    marchingSquaresFromRegion(grid, region, offsetX, offsetY, isHole = false) {
+        // Create a sub-grid for just this region
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+
+        region.forEach(key => {
+            const [x, y] = key.split(',').map(Number);
+            minX = Math.min(minX, x);
+            maxX = Math.max(maxX, x);
+            minY = Math.min(minY, y);
+            maxY = Math.max(maxY, y);
+        });
+
+        // Create sub-grid with padding
+        const subWidth = maxX - minX + 3;
+        const subHeight = maxY - minY + 3;
+        const subGrid = Array(subHeight).fill(0).map(() => Array(subWidth).fill(0));
+
+        region.forEach(key => {
+            const [x, y] = key.split(',').map(Number);
+            const sx = x - minX + 1;
+            const sy = y - minY + 1;
+            subGrid[sy][sx] = 1;
+        });
+
+        // For holes, we need to invert the grid
+        if (isHole) {
+            for (let y = 0; y < subHeight; y++) {
+                for (let x = 0; x < subWidth; x++) {
+                    subGrid[y][x] = 1 - subGrid[y][x];
+                }
+            }
+        }
+
+        return this.marchingSquares(subGrid, minX - 1 + offsetX, minY - 1 + offsetY);
+    }
+
+    isHole(grid, startX, startY) {
+        // Check if this empty region is completely surrounded by filled pixels
+        const height = grid.length;
+        const width = grid[0].length;
+
+        // If touching the edge, it's not a hole
+        if (startX === 0 || startX === width - 1 || startY === 0 || startY === height - 1) {
+            return false;
+        }
+
+        // Quick check: do a flood fill and see if we reach the edge
+        const visited = Array(height).fill(0).map(() => Array(width).fill(false));
+        const queue = [{x: startX, y: startY}];
+        visited[startY][startX] = true;
+
+        while (queue.length > 0) {
+            const {x, y} = queue.shift();
+
+            // If we reached the edge, not a hole
+            if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
+                return false;
+            }
+
+            // Check 4 neighbors
+            const neighbors = [{x: x-1, y}, {x: x+1, y}, {x, y: y-1}, {x, y: y+1}];
+            for (const {x: nx, y: ny} of neighbors) {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height &&
+                    grid[ny][nx] === 0 && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({x: nx, y: ny});
+                }
+            }
+        }
+
+        return true; // Didn't reach edge, so it's a hole
+    }
+
+
+    floodFillVisited(grid, visited, startX, startY, value) {
+        const height = grid.length;
+        const width = grid[0].length;
+        const queue = [{x: startX, y: startY}];
+        visited[startY][startX] = true;
+
+        while (queue.length > 0) {
+            const {x, y} = queue.shift();
+
+            const neighbors = [{x: x-1, y}, {x: x+1, y}, {x, y: y-1}, {x, y: y+1}];
+            for (const {x: nx, y: ny} of neighbors) {
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height &&
+                    grid[ny][nx] === value && !visited[ny][nx]) {
+                    visited[ny][nx] = true;
+                    queue.push({x: nx, y: ny});
+                }
+            }
+        }
     }
 
     marchingSquares(grid, offsetX, offsetY) {
@@ -1407,13 +2055,29 @@ class VectorEditor {
     simplifyPolygon(points, tolerance) {
         if (points.length < 3) return points;
 
-        // Remove consecutive duplicate points first
+        // Remove consecutive duplicate points first (including very close points)
         const unique = [points[0]];
         for (let i = 1; i < points.length; i++) {
             const prev = unique[unique.length - 1];
             const curr = points[i];
-            if (curr.x !== prev.x || curr.y !== prev.y) {
+            const dx = curr.x - prev.x;
+            const dy = curr.y - prev.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            // Only add if not too close to previous point
+            if (dist > 0.5) {
                 unique.push(curr);
+            }
+        }
+
+        // Check if first and last points are the same or very close
+        if (unique.length > 1) {
+            const first = unique[0];
+            const last = unique[unique.length - 1];
+            const dx = last.x - first.x;
+            const dy = last.y - first.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 0.5) {
+                unique.pop(); // Remove duplicate closing point
             }
         }
 
@@ -1423,11 +2087,12 @@ class VectorEditor {
         const simplified = this.douglasPeucker(unique, tolerance);
 
         // Further simplify by removing points that are nearly collinear
-        const final = [simplified[0]];
-        for (let i = 1; i < simplified.length - 1; i++) {
-            const prev = final[final.length - 1];
+        // For polygons (closed shapes), also check the wrap-around case
+        const final = [];
+        for (let i = 0; i < simplified.length; i++) {
+            const prev = simplified[(i - 1 + simplified.length) % simplified.length];
             const curr = simplified[i];
-            const next = simplified[i + 1];
+            const next = simplified[(i + 1) % simplified.length];
 
             // Check if curr is roughly on the line between prev and next
             const dx1 = curr.x - prev.x;
@@ -1442,7 +2107,6 @@ class VectorEditor {
                 final.push(curr);
             }
         }
-        final.push(simplified[simplified.length - 1]);
 
         return final.length >= 3 ? final : simplified;
     }
@@ -1492,24 +2156,47 @@ class VectorEditor {
     }
 
     undo() {
-        if (this.historyIndex > 0) {
+        if (this.historyIndex >= 0) {
             this.historyIndex--;
-            this.shapes = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+            // If we go to index -1, that's a blank canvas
+            if (this.historyIndex < 0) {
+                this.shapes = [];
+            } else {
+                const state = this.history[this.historyIndex];
+                this.shapes = JSON.parse(JSON.stringify(state.shapes));
+                // Restore canvas dimensions if they were saved
+                if (state.canvasWidth && state.canvasHeight) {
+                    this.canvasWidth = state.canvasWidth;
+                    this.canvasHeight = state.canvasHeight;
+                    this.canvas.width = this.canvasWidth * this.scale;
+                    this.canvas.height = this.canvasHeight * this.scale;
+                }
+            }
             this.selectedShape = null;
             this.selectedShapes = [];
             this.selectedPoint = null;
             this.render();
+            this.updateShapeOrderPreview();
         }
     }
 
     redo() {
         if (this.historyIndex < this.history.length - 1) {
             this.historyIndex++;
-            this.shapes = JSON.parse(JSON.stringify(this.history[this.historyIndex]));
+            const state = this.history[this.historyIndex];
+            this.shapes = JSON.parse(JSON.stringify(state.shapes));
+            // Restore canvas dimensions if they were saved
+            if (state.canvasWidth && state.canvasHeight) {
+                this.canvasWidth = state.canvasWidth;
+                this.canvasHeight = state.canvasHeight;
+                this.canvas.width = this.canvasWidth * this.scale;
+                this.canvas.height = this.canvasHeight * this.scale;
+            }
             this.selectedShape = null;
             this.selectedShapes = [];
             this.selectedPoint = null;
             this.render();
+            this.updateShapeOrderPreview();
         }
     }
 
@@ -1585,6 +2272,241 @@ class VectorEditor {
         input.click();
     }
 
+    showExportDialog(format) {
+        const modal = document.getElementById('exportModal');
+        const titleEl = document.getElementById('exportModalTitle');
+        const scaleInput = document.getElementById('exportScale');
+        const sizeSpan = document.getElementById('exportSize');
+        const transparentCheckbox = document.getElementById('exportTransparent');
+        const transparentOption = document.getElementById('exportTransparencyOption');
+        const confirmBtn = document.getElementById('exportConfirm');
+        const cancelBtn = document.getElementById('exportCancel');
+
+        // Set title and transparency option visibility
+        titleEl.textContent = `Export as ${format.toUpperCase()}`;
+        transparentOption.style.display = format === 'png' ? 'block' : 'none';
+
+        // Calculate pixel-perfect size based on grid
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        // Update size display
+        const updateSize = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            sizeSpan.textContent = `${actualWidth * scale} × ${actualHeight * scale}`;
+        };
+
+        scaleInput.value = 1;
+        transparentCheckbox.checked = false;
+        updateSize();
+
+        scaleInput.oninput = updateSize;
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Handle confirm
+        const handleConfirm = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            const transparent = format === 'png' && transparentCheckbox.checked;
+            modal.style.display = 'none';
+
+            if (format === 'png') {
+                this.exportPNG(scale, transparent);
+            } else {
+                this.exportJPG(scale);
+            }
+
+            cleanup();
+        };
+
+        // Handle cancel
+        const handleCancel = () => {
+            modal.style.display = 'none';
+            cleanup();
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            scaleInput.oninput = null;
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    }
+
+    exportPNG(exportScale = 1, transparent = false) {
+        // Calculate pixel-perfect size
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        // Step 1: Render shapes to a temporary canvas (without background if transparent)
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        // Save original state
+        const savedCanvas = this.canvas;
+        const savedCtx = this.ctx;
+        const savedBgColor = this.backgroundColor;
+
+        // Temporarily set transparent background if needed
+        if (transparent) {
+            this.backgroundColor = 'rgba(0,0,0,0)';
+        }
+
+        // Set temp canvas as current
+        this.canvas = tempCanvas;
+        this.ctx = tempCtx;
+
+        // Render (this will call the normal render which includes background)
+        this.render();
+
+        // Restore original state
+        this.canvas = savedCanvas;
+        this.ctx = savedCtx;
+        this.backgroundColor = savedBgColor;
+
+        // Step 2: Downsample to pixel-perfect size using nearest-neighbor
+        const pixelCanvas = document.createElement('canvas');
+        pixelCanvas.width = actualWidth;
+        pixelCanvas.height = actualHeight;
+        const pixelCtx = pixelCanvas.getContext('2d');
+
+        // Get source image data
+        const sourceData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+        const destData = pixelCtx.createImageData(actualWidth, actualHeight);
+
+        // Calculate scaling ratios
+        const scaleX = tempCanvas.width / actualWidth;
+        const scaleY = tempCanvas.height / actualHeight;
+
+        // Nearest-neighbor downsampling - sample exact pixels
+        for (let y = 0; y < actualHeight; y++) {
+            for (let x = 0; x < actualWidth; x++) {
+                // Find the corresponding source pixel (center of the cell)
+                const srcX = Math.floor((x + 0.5) * scaleX);
+                const srcY = Math.floor((y + 0.5) * scaleY);
+
+                const srcIndex = (srcY * tempCanvas.width + srcX) * 4;
+                const destIndex = (y * actualWidth + x) * 4;
+
+                destData.data[destIndex] = sourceData.data[srcIndex];         // R
+                destData.data[destIndex + 1] = sourceData.data[srcIndex + 1]; // G
+                destData.data[destIndex + 2] = sourceData.data[srcIndex + 2]; // B
+                destData.data[destIndex + 3] = sourceData.data[srcIndex + 3]; // A
+            }
+        }
+
+        pixelCtx.putImageData(destData, 0, 0);
+
+        // Step 3: Scale up if needed for export scale
+        let finalCanvas = pixelCanvas;
+        if (exportScale > 1) {
+            finalCanvas = document.createElement('canvas');
+            finalCanvas.width = actualWidth * exportScale;
+            finalCanvas.height = actualHeight * exportScale;
+            const finalCtx = finalCanvas.getContext('2d');
+
+            // Disable image smoothing for crisp pixels
+            finalCtx.imageSmoothingEnabled = false;
+            finalCtx.mozImageSmoothingEnabled = false;
+            finalCtx.webkitImageSmoothingEnabled = false;
+            finalCtx.msImageSmoothingEnabled = false;
+
+            // Scale up the pixel-perfect canvas
+            finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
+        }
+
+        // Download the image
+        finalCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'vector-art.png';
+            a.click();
+            URL.revokeObjectURL(url);
+        }, 'image/png');
+    }
+
+    exportJPG(exportScale = 1) {
+        // Calculate pixel-perfect size
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        // Step 1: Copy the current canvas as-is
+        const fullCanvas = document.createElement('canvas');
+        fullCanvas.width = this.canvas.width;
+        fullCanvas.height = this.canvas.height;
+        const fullCtx = fullCanvas.getContext('2d');
+
+        // Draw the current canvas content
+        fullCtx.drawImage(this.canvas, 0, 0);
+
+        // Step 2: Downsample to pixel-perfect size using nearest-neighbor
+        const pixelCanvas = document.createElement('canvas');
+        pixelCanvas.width = actualWidth;
+        pixelCanvas.height = actualHeight;
+        const pixelCtx = pixelCanvas.getContext('2d');
+
+        // Get source image data
+        const sourceData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
+        const destData = pixelCtx.createImageData(actualWidth, actualHeight);
+
+        // Calculate scaling ratios
+        const scaleX = fullCanvas.width / actualWidth;
+        const scaleY = fullCanvas.height / actualHeight;
+
+        // Nearest-neighbor downsampling - sample exact pixels
+        for (let y = 0; y < actualHeight; y++) {
+            for (let x = 0; x < actualWidth; x++) {
+                // Find the corresponding source pixel (center of the cell)
+                const srcX = Math.floor((x + 0.5) * scaleX);
+                const srcY = Math.floor((y + 0.5) * scaleY);
+
+                const srcIndex = (srcY * fullCanvas.width + srcX) * 4;
+                const destIndex = (y * actualWidth + x) * 4;
+
+                destData.data[destIndex] = sourceData.data[srcIndex];         // R
+                destData.data[destIndex + 1] = sourceData.data[srcIndex + 1]; // G
+                destData.data[destIndex + 2] = sourceData.data[srcIndex + 2]; // B
+                destData.data[destIndex + 3] = sourceData.data[srcIndex + 3]; // A
+            }
+        }
+
+        pixelCtx.putImageData(destData, 0, 0);
+
+        // Step 3: Scale up if needed for export scale
+        let finalCanvas = pixelCanvas;
+        if (exportScale > 1) {
+            finalCanvas = document.createElement('canvas');
+            finalCanvas.width = actualWidth * exportScale;
+            finalCanvas.height = actualHeight * exportScale;
+            const finalCtx = finalCanvas.getContext('2d');
+
+            // Disable image smoothing for crisp pixels
+            finalCtx.imageSmoothingEnabled = false;
+            finalCtx.mozImageSmoothingEnabled = false;
+            finalCtx.webkitImageSmoothingEnabled = false;
+            finalCtx.msImageSmoothingEnabled = false;
+
+            // Scale up the pixel-perfect canvas
+            finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
+        }
+
+        // Download the image
+        finalCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'vector-art.jpg';
+            a.click();
+            URL.revokeObjectURL(url);
+        }, 'image/jpeg', 0.95);
+    }
+
     handleKeyDown(e) {
         // Ctrl shortcuts - handle these first to prevent conflicts
         if (e.ctrlKey || e.metaKey) {
@@ -1600,6 +2522,11 @@ class VectorEditor {
             }
             if (e.key === 'z' || e.key === 'Z') {
                 this.undo();
+                e.preventDefault();
+                return;
+            }
+            if (e.key === 'y' || e.key === 'Y') {
+                this.redo();
                 e.preventDefault();
                 return;
             }
@@ -1660,6 +2587,18 @@ class VectorEditor {
             e.preventDefault();
         }
 
+        // Zen Mode toggle
+        if (e.key === 'z' || e.key === 'Z') {
+            // Only trigger if no modifiers are pressed (to avoid conflict with Ctrl+Z undo)
+            if (!e.ctrlKey && !e.shiftKey && !e.altKey) {
+                const zenButton = document.getElementById('view-zen-mode');
+                if (zenButton) {
+                    zenButton.click();
+                }
+                e.preventDefault();
+            }
+        }
+
         // Zoom controls
         if (e.key === '+' || e.key === '=') {
             this.zoomIn();
@@ -1684,11 +2623,35 @@ class VectorEditor {
             e.preventDefault();
         }
 
+        // Boolean operations (Ctrl+Shift to avoid browser conflicts)
+        if (e.ctrlKey && e.shiftKey && (e.key === 'U' || e.key === 'u')) {
+            this.booleanUnion();
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+            this.booleanSubtract();
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i')) {
+            this.booleanIntersect();
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
+            this.convertToPolygon();
+            e.preventDefault();
+        }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'M' || e.key === 'm')) {
+            this.unionNodes();
+            e.preventDefault();
+        }
+
         // Actions
         if (e.key === 'Escape') {
             this.currentPoints = [];
             this.selectedShape = null;
+            this.selectedShapes = [];
             this.selectedPoint = null;
+            this.selectedPoints = [];
             this.lockDirection = null;
             this.render();
         }
@@ -1725,12 +2688,12 @@ class VectorEditor {
         }
 
         // Draw points for selected shape (only if single shape selected)
-        if (this.selectedShape && this.selectedShapes.length === 1 && this.currentTool === 'select') {
+        if (this.showSelectionNodes && this.selectedShape && this.selectedShapes.length === 1 && this.currentTool === 'select') {
             this.drawPoints(this.selectedShape);
         }
 
         // Draw bounding box for multiple selected shapes
-        if (this.selectedShapes.length > 1 && this.currentTool === 'select') {
+        if (this.showSelectionNodes && this.selectedShapes.length > 1 && this.currentTool === 'select') {
             this.drawMultiSelectionBox();
         }
 
@@ -1749,6 +2712,9 @@ class VectorEditor {
             this.updateHistoryPreview();
             this.lastHistoryIndex = this.historyIndex;
         }
+
+        // Update preview panel
+        this.updatePreview();
     }
 
     drawGrid() {
@@ -1778,57 +2744,108 @@ class VectorEditor {
         this.ctx.globalAlpha = 1.0;
     }
 
-    drawShape(shape, isSelected) {
+    drawShape(shape, isSelectedOrCtx, scaleOverride) {
+        // Handle both old signature (shape, isSelected) and new (shape, ctx, scale)
+        let ctx = this.ctx;
+        let scale = this.scale;
+        let isSelected = false;
+
+        if (typeof isSelectedOrCtx === 'object') {
+            // New signature: (shape, ctx, scale)
+            ctx = isSelectedOrCtx;
+            scale = scaleOverride || 1;
+        } else {
+            // Old signature: (shape, isSelected)
+            isSelected = isSelectedOrCtx || false;
+        }
+
         const color = this.colors[shape.color];
-        const lineWidth = shape.lineWidth || 1; // Default to 1 for old shapes
-        const outline = shape.outline || false; // Default to filled for old shapes
+        const lineWidth = shape.lineWidth || 1;
+        const outline = shape.outline || false;
+        const ditherPattern = shape.ditherPattern;
+
+        if (ditherPattern !== undefined && ditherPattern !== null) {
+            console.log('Drawing shape with dither:', shape.type, 'pattern:', ditherPattern);
+        }
+
+        const prevCtx = this.ctx;
+        const prevScale = this.scale;
+        this.ctx = ctx;
+        this.scale = scale;
 
         switch (shape.type) {
             case 'line':
                 this.drawLine(shape.points, color, lineWidth);
                 break;
             case 'rect':
-                this.drawRect(shape.points, color, lineWidth, outline);
+                this.drawRect(shape.points, color, lineWidth, outline, ditherPattern);
                 break;
             case 'circle':
-                this.drawCircle(shape.points, color, lineWidth, outline);
+                this.drawCircle(shape.points, color, lineWidth, outline, ditherPattern);
                 break;
             case 'oval':
-                this.drawOval(shape.points, color, lineWidth, outline);
+                this.drawOval(shape.points, color, lineWidth, outline, ditherPattern);
                 break;
             case 'triangle':
-                this.drawTriangle(shape.points, color, lineWidth, outline);
+                this.drawTriangle(shape.points, color, lineWidth, outline, ditherPattern);
                 break;
             case 'polygon':
-                this.drawPolygon(shape.points, color, lineWidth, outline);
+                this.drawPolygon(shape.points, color, lineWidth, outline, ditherPattern);
                 break;
             case 'fill':
-                this.drawFill(shape.points[0], color);
+                this.drawFill(shape.points[0], color, ditherPattern);
                 break;
         }
+
+        this.ctx = prevCtx;
+        this.scale = prevScale;
     }
 
-    drawFill(point, color) {
+    drawFill(point, color, ditherPattern = undefined) {
         const cellSize = this.getCellSize();
 
         if (cellSize > 0) {
             // Grid mode - fill the grid cell
             const cx = Math.floor(point.x / cellSize);
             const cy = Math.floor(point.y / cellSize);
-            this.ctx.fillStyle = color;
-            this.ctx.fillRect(cx * cellSize * this.scale, cy * cellSize * this.scale,
-                             cellSize * this.scale, cellSize * this.scale);
+            const pixelX = cx * cellSize;
+            const pixelY = cy * cellSize;
+            const cellPixelSize = cellSize;
+
+            if (ditherPattern !== undefined && ditherPattern !== null) {
+                // Apply dither pattern pixel by pixel
+                for (let py = 0; py < cellPixelSize; py++) {
+                    for (let px = 0; px < cellPixelSize; px++) {
+                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                    }
+                }
+            } else {
+                // Apply scale for rendering (scale = 1 during rasterization, > 1 during normal render)
+                this.ctx.fillStyle = color;
+                this.ctx.fillRect(pixelX * this.scale, pixelY * this.scale,
+                                 cellPixelSize * this.scale, cellPixelSize * this.scale);
+            }
         } else {
             // Regular mode - fill a small square
-            this.ctx.fillStyle = color;
-            this.ctx.fillRect(point.x * this.scale - 2 * this.scale,
-                             point.y * this.scale - 2 * this.scale,
-                             4 * this.scale, 4 * this.scale);
+            const size = 4;
+            const halfSize = 2;
+            if (ditherPattern !== undefined && ditherPattern !== null) {
+                for (let py = -halfSize; py < halfSize; py++) {
+                    for (let px = -halfSize; px < halfSize; px++) {
+                        this.applyDitherPattern(point.x + px, point.y + py, color, ditherPattern);
+                    }
+                }
+            } else {
+                this.ctx.fillStyle = color;
+                this.ctx.fillRect((point.x - halfSize) * this.scale,
+                                 (point.y - halfSize) * this.scale,
+                                 size * this.scale, size * this.scale);
+            }
         }
     }
 
     // Bresenham line algorithm for pixel-perfect lines with width support
-    drawLine(points, color, lineWidth = 1) {
+    drawLine(points, color, lineWidth = 1, ditherPattern = undefined) {
         let x0 = Math.floor(points[0].x);
         let y0 = Math.floor(points[0].y);
         let x1 = Math.floor(points[1].x);
@@ -1860,9 +2877,19 @@ class VectorEditor {
                 const cellKey = `${cx},${cy}`;
                 if (!filledCells.has(cellKey)) {
                     filledCells.add(cellKey);
-                    this.ctx.fillStyle = color;
-                    this.ctx.fillRect(cx * cellSize * this.scale, cy * cellSize * this.scale,
-                                     cellSize * this.scale, cellSize * this.scale);
+                    if (ditherPattern !== undefined && ditherPattern !== null) {
+                        const pixelX = cx * cellSize;
+                        const pixelY = cy * cellSize;
+                        for (let py = 0; py < cellSize; py++) {
+                            for (let px = 0; px < cellSize; px++) {
+                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                            }
+                        }
+                    } else {
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(cx * cellSize * this.scale, cy * cellSize * this.scale,
+                                         cellSize * this.scale, cellSize * this.scale);
+                    }
                 }
 
                 if (cx === cx1 && cy === cy1) break;
@@ -1887,7 +2914,11 @@ class VectorEditor {
             while (true) {
                 // Draw thick line by drawing a circle of pixels at each point
                 if (lineWidth === 1) {
-                    this.setPixel(x0, y0, color);
+                    if (ditherPattern !== undefined && ditherPattern !== null) {
+                        this.applyDitherPattern(x0, y0, color, ditherPattern);
+                    } else {
+                        this.setPixel(x0, y0, color);
+                    }
                 } else {
                     // Draw a filled circle for thickness
                     const radius = Math.floor(lineWidth / 2);
@@ -1895,7 +2926,11 @@ class VectorEditor {
                         for (let dx = -radius; dx <= radius; dx++) {
                             // Circle equation
                             if (dx * dx + dy * dy <= radius * radius) {
-                                this.setPixel(x0 + dx, y0 + dy, color);
+                                if (ditherPattern !== undefined && ditherPattern !== null) {
+                                    this.applyDitherPattern(x0 + dx, y0 + dy, color, ditherPattern);
+                                } else {
+                                    this.setPixel(x0 + dx, y0 + dy, color);
+                                }
                             }
                         }
                     }
@@ -1915,7 +2950,7 @@ class VectorEditor {
         }
     }
 
-    drawRect(points, color, lineWidth = 1, outline = false) {
+    drawRect(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
         const x1 = Math.floor(Math.min(points[0].x, points[1].x));
         const y1 = Math.floor(Math.min(points[0].y, points[1].y));
         const x2 = Math.floor(Math.max(points[0].x, points[1].x));
@@ -1941,22 +2976,36 @@ class VectorEditor {
 
             for (let cy = startCellY; cy <= endCellY; cy++) {
                 for (let cx = startCellX; cx <= endCellX; cx++) {
-                    this.ctx.fillStyle = color;
-                    this.ctx.fillRect(cx * cellSize * this.scale, cy * cellSize * this.scale,
-                                     cellSize * this.scale, cellSize * this.scale);
+                    if (ditherPattern !== undefined && ditherPattern !== null) {
+                        const pixelX = cx * cellSize;
+                        const pixelY = cy * cellSize;
+                        for (let py = 0; py < cellSize; py++) {
+                            for (let px = 0; px < cellSize; px++) {
+                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                            }
+                        }
+                    } else {
+                        this.ctx.fillStyle = color;
+                        this.ctx.fillRect(cx * cellSize * this.scale, cy * cellSize * this.scale,
+                                         cellSize * this.scale, cellSize * this.scale);
+                    }
                 }
             }
         } else {
             for (let y = y1; y <= y2; y++) {
                 for (let x = x1; x <= x2; x++) {
-                    this.setPixel(x, y, color);
+                    if (ditherPattern !== undefined && ditherPattern !== null) {
+                        this.applyDitherPattern(x, y, color, ditherPattern);
+                    } else {
+                        this.setPixel(x, y, color);
+                    }
                 }
             }
         }
     }
 
     // Midpoint circle algorithm for pixel-perfect circles
-    drawCircle(points, color, lineWidth = 1, outline = false) {
+    drawCircle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
         const cx = Math.floor(points[0].x);
         const cy = Math.floor(points[0].y);
         const dx = points[1].x - points[0].x;
@@ -2014,7 +3063,7 @@ class VectorEditor {
                     const cellKey = `${Math.floor(px / cellSize)},${Math.floor(py / cellSize)}`;
                     if (!filledCells.has(cellKey)) {
                         filledCells.add(cellKey);
-                        this.fillGridCell(px, py, color);
+                        this.fillGridCell(px, py, color, ditherPattern);
                     }
                 }
             }
@@ -2022,13 +3071,17 @@ class VectorEditor {
             for (let y = -radius; y <= radius; y++) {
                 const width = Math.floor(Math.sqrt(radius * radius - y * y));
                 for (let x = -width; x <= width; x++) {
-                    this.setPixel(cx + x, cy + y, color);
+                    if (ditherPattern !== undefined && ditherPattern !== null) {
+                        this.applyDitherPattern(cx + x, cy + y, color, ditherPattern);
+                    } else {
+                        this.setPixel(cx + x, cy + y, color);
+                    }
                 }
             }
         }
     }
 
-    drawOval(points, color, lineWidth = 1, outline = false) {
+    drawOval(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
         // Define oval by two corners (bounding box)
         const x1 = Math.floor(Math.min(points[0].x, points[1].x));
         const y1 = Math.floor(Math.min(points[0].y, points[1].y));
@@ -2104,7 +3157,7 @@ class VectorEditor {
                         const cellKey = `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
                         if (!filledCells.has(cellKey)) {
                             filledCells.add(cellKey);
-                            this.fillGridCell(x, y, color);
+                            this.fillGridCell(x, y, color, ditherPattern);
                         }
                     }
                 }
@@ -2118,14 +3171,18 @@ class VectorEditor {
                     const xEnd = Math.ceil(cx + width);
 
                     for (let x = xStart; x <= xEnd; x++) {
-                        this.setPixel(x, y, color);
+                        if (ditherPattern !== undefined && ditherPattern !== null) {
+                            this.applyDitherPattern(x, y, color, ditherPattern);
+                        } else {
+                            this.setPixel(x, y, color);
+                        }
                     }
                 }
             }
         }
     }
 
-    drawTriangle(points, color, lineWidth = 1, outline = false) {
+    drawTriangle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
         if (outline) {
             // Draw outline - three lines
             this.drawLine([points[0], points[1]], color, lineWidth);
@@ -2134,10 +3191,10 @@ class VectorEditor {
             return;
         }
         // Fill triangle using scanline algorithm
-        this.fillPolygon([points[0], points[1], points[2]], color, lineWidth);
+        this.fillPolygon([points[0], points[1], points[2]], color, lineWidth, ditherPattern);
     }
 
-    drawPolygon(points, color, lineWidth = 1, outline = false) {
+    drawPolygon(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
         if (points.length < 3) return;
 
         if (outline) {
@@ -2149,11 +3206,11 @@ class VectorEditor {
             return;
         }
 
-        this.fillPolygon(points, color, lineWidth);
+        this.fillPolygon(points, color, lineWidth, ditherPattern);
     }
 
     // Scanline polygon fill algorithm
-    fillPolygon(points, color, lineWidth = 1) {
+    fillPolygon(points, color, lineWidth = 1, ditherPattern = undefined) {
         if (points.length < 3) return;
 
         // Find bounding box
@@ -2201,13 +3258,27 @@ class VectorEditor {
                         const cellY = Math.floor(y / cellSize);
 
                         for (let cx = startCellX; cx <= endCellX; cx++) {
-                            this.ctx.fillStyle = color;
-                            this.ctx.fillRect(cx * cellSize * this.scale, cellY * cellSize * this.scale,
-                                            cellSize * this.scale, cellSize * this.scale);
+                            if (ditherPattern !== undefined && ditherPattern !== null) {
+                                const pixelX = cx * cellSize;
+                                const pixelY = cellY * cellSize;
+                                for (let py = 0; py < cellSize; py++) {
+                                    for (let px = 0; px < cellSize; px++) {
+                                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                                    }
+                                }
+                            } else {
+                                this.ctx.fillStyle = color;
+                                this.ctx.fillRect(cx * cellSize * this.scale, cellY * cellSize * this.scale,
+                                                cellSize * this.scale, cellSize * this.scale);
+                            }
                         }
                     } else {
                         for (let x = intersections[i]; x <= intersections[i + 1]; x++) {
-                            this.setPixel(x, y, color);
+                            if (ditherPattern !== undefined && ditherPattern !== null) {
+                                this.applyDitherPattern(x, y, color, ditherPattern);
+                            } else {
+                                this.setPixel(x, y, color);
+                            }
                         }
                     }
                 }
@@ -2222,10 +3293,14 @@ class VectorEditor {
     }
 
     // Fill an entire grid cell at the given position
-    fillGridCell(x, y, color) {
+    fillGridCell(x, y, color, ditherPattern = undefined) {
         const cellSize = this.getCellSize();
         if (cellSize <= 0) {
-            this.setPixel(x, y, color);
+            if (ditherPattern !== undefined && ditherPattern !== null) {
+                this.applyDitherPattern(x, y, color, ditherPattern);
+            } else {
+                this.setPixel(x, y, color);
+            }
             return;
         }
 
@@ -2233,9 +3308,18 @@ class VectorEditor {
         const cellX = Math.floor(x / cellSize) * cellSize;
         const cellY = Math.floor(y / cellSize) * cellSize;
 
-        // Use direct canvas fillRect for entire cell - much faster than pixel-by-pixel
-        this.ctx.fillStyle = color;
-        this.ctx.fillRect(cellX * this.scale, cellY * this.scale, cellSize * this.scale, cellSize * this.scale);
+        // Apply dither pattern to the entire cell if requested
+        if (ditherPattern !== undefined && ditherPattern !== null) {
+            for (let py = 0; py < cellSize; py++) {
+                for (let px = 0; px < cellSize; px++) {
+                    this.applyDitherPattern(cellX + px, cellY + py, color, ditherPattern);
+                }
+            }
+        } else {
+            // Use direct canvas fillRect for entire cell - much faster than pixel-by-pixel
+            this.ctx.fillStyle = color;
+            this.ctx.fillRect(cellX * this.scale, cellY * this.scale, cellSize * this.scale, cellSize * this.scale);
+        }
     }
 
     drawPreview() {
@@ -2291,7 +3375,8 @@ class VectorEditor {
 
     drawPoints(shape) {
         shape.points.forEach(p => {
-            const isSelected = p === this.selectedPoint;
+            // Check if point is in the multi-selection
+            const isSelected = this.selectedPoints.includes(p);
             this.drawPoint(p, isSelected ? '#ff0000' : '#00d9ff');
         });
     }
@@ -2695,8 +3780,29 @@ class VectorEditor {
 
         listElement.innerHTML = '';
 
+        // Add "Blank canvas" entry at the beginning
+        const blankItem = document.createElement('div');
+        blankItem.className = 'history-item';
+        if (this.historyIndex === -1) {
+            blankItem.classList.add('current');
+        }
+
+        const blankIcon = document.createElement('div');
+        blankIcon.className = 'history-icon';
+        blankIcon.textContent = this.historyIndex === -1 ? '●' : '∅';
+
+        const blankLabel = document.createElement('div');
+        blankLabel.className = 'history-label';
+        blankLabel.textContent = `Blank canvas (${this.canvasWidth}×${this.canvasHeight})`;
+
+        blankItem.appendChild(blankIcon);
+        blankItem.appendChild(blankLabel);
+        blankItem.addEventListener('click', () => {
+            this.jumpToHistory(-1);
+        });
+        listElement.appendChild(blankItem);
+
         if (this.history.length === 0) {
-            listElement.innerHTML = '<div style="text-align: center; color: #888; font-size: 11px; padding: 10px;">No history</div>';
             return;
         }
 
@@ -2713,17 +3819,19 @@ class VectorEditor {
             // Create icon
             const icon = document.createElement('div');
             icon.className = 'history-icon';
-            icon.textContent = index === this.historyIndex ? '●' : index;
+            icon.textContent = index === this.historyIndex ? '●' : (index + 1);
 
             // Create label with shape count
             const label = document.createElement('div');
             label.className = 'history-label';
-            const shapeCount = state.length;
+            const shapeCount = state.shapes ? state.shapes.length : state.length;
+            const canvasW = state.canvasWidth || this.canvasWidth;
+            const canvasH = state.canvasHeight || this.canvasHeight;
 
             // Determine action based on comparison with previous state
             let action = 'Initial';
             if (index > 0) {
-                const prevCount = this.history[index - 1].length;
+                const prevCount = this.history[index - 1].shapes ? this.history[index - 1].shapes.length : this.history[index - 1].length;
                 if (shapeCount > prevCount) {
                     action = 'Add shape';
                 } else if (shapeCount < prevCount) {
@@ -2733,7 +3841,7 @@ class VectorEditor {
                 }
             }
 
-            label.textContent = `${action} (${shapeCount} shape${shapeCount !== 1 ? 's' : ''})`;
+            label.textContent = `${action} (${shapeCount} shape${shapeCount !== 1 ? 's' : ''}, ${canvasW}×${canvasH})`;
 
             // Assemble item
             item.appendChild(icon);
@@ -2755,14 +3863,26 @@ class VectorEditor {
     }
 
     jumpToHistory(targetIndex) {
-        if (targetIndex < 0 || targetIndex >= this.history.length) return;
+        if (targetIndex < -1 || targetIndex >= this.history.length) return;
         if (targetIndex === this.historyIndex) return;
 
         // Set the history index
         this.historyIndex = targetIndex;
 
         // Restore the state
-        this.shapes = JSON.parse(JSON.stringify(this.history[targetIndex]));
+        if (targetIndex < 0) {
+            this.shapes = [];
+        } else {
+            const state = this.history[targetIndex];
+            this.shapes = JSON.parse(JSON.stringify(state.shapes));
+            // Restore canvas dimensions if they were saved
+            if (state.canvasWidth && state.canvasHeight) {
+                this.canvasWidth = state.canvasWidth;
+                this.canvasHeight = state.canvasHeight;
+                this.canvas.width = this.canvasWidth * this.scale;
+                this.canvas.height = this.canvasHeight * this.scale;
+            }
+        }
 
         // Clear selections
         this.selectedShape = null;
@@ -2854,8 +3974,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const menuItems = {
         'menu-save': () => window.editor.save(),
         'menu-load': () => window.editor.load(),
+        'menu-export-png': () => window.editor.showExportDialog('png'),
+        'menu-export-jpg': () => window.editor.showExportDialog('jpg'),
         'menu-clear': () => window.editor.clear(),
         'menu-undo': () => window.editor.undo(),
+        'menu-redo': () => window.editor.redo(),
         'menu-copy': () => window.editor.copyShape(),
         'menu-paste': () => window.editor.pasteShape(),
         'menu-delete': () => window.editor.deleteShape()
@@ -2876,6 +3999,7 @@ document.addEventListener('DOMContentLoaded', () => {
         leftPanel: true,
         colorPalette: true,
         shapesPanel: true,
+        previewPanel: true,
         timelinePanel: true
     };
 
@@ -2904,8 +4028,37 @@ document.addEventListener('DOMContentLoaded', () => {
         toggleView('view-shapes-panel', '.panel-box:has(.tabs)', 'Shapes/History');
     });
 
+    document.getElementById('view-preview-panel')?.addEventListener('click', () => {
+        toggleView('view-preview-panel', '.preview-panel', 'Preview');
+    });
+
     document.getElementById('view-timeline-panel')?.addEventListener('click', () => {
         toggleView('view-timeline-panel', '.timeline-panel', 'Timeline');
+    });
+
+    // Toggle Grid
+    document.getElementById('view-toggle-grid')?.addEventListener('click', () => {
+        window.editor.showGrid = !window.editor.showGrid;
+        const toggleGrid = document.getElementById('toggle-grid');
+        if (toggleGrid) {
+            toggleGrid.textContent = window.editor.showGrid ? 'Hide Grid' : 'Show Grid';
+        }
+        window.editor.render();
+    });
+
+    // Toggle Outline
+    document.getElementById('view-toggle-outline')?.addEventListener('click', () => {
+        // Toggle outline for all selected shapes
+        if (window.editor.selectedShapes.length > 0) {
+            const newOutlineState = !window.editor.selectedShapes[0].outline;
+            window.editor.selectedShapes.forEach(shape => {
+                shape.outline = newOutlineState;
+            });
+            window.editor.render();
+        } else if (window.editor.selectedShape) {
+            window.editor.selectedShape.outline = !window.editor.selectedShape.outline;
+            window.editor.render();
+        }
     });
 
     // Zen mode - hide all panels
@@ -2917,35 +4070,161 @@ document.addEventListener('DOMContentLoaded', () => {
             document.querySelector('.left-panel').style.display = '';
             document.querySelector('.panel-box:has(#colorPalette)').style.display = '';
             document.querySelector('.panel-box:has(.tabs)').style.display = '';
+            document.querySelector('.preview-panel').style.display = '';
             document.querySelector('.timeline-panel').style.display = '';
 
             document.getElementById('view-left-panel').textContent = '✓ Left Toolbar';
             document.getElementById('view-color-palette').textContent = '✓ Color Palette';
             document.getElementById('view-shapes-panel').textContent = '✓ Shapes/History';
+            document.getElementById('view-preview-panel').textContent = '✓ Preview';
             document.getElementById('view-timeline-panel').textContent = '✓ Timeline';
 
             viewState.leftPanel = true;
             viewState.colorPalette = true;
             viewState.shapesPanel = true;
+            viewState.previewPanel = true;
             viewState.timelinePanel = true;
         } else {
             // Hide all panels
             document.querySelector('.left-panel').style.display = 'none';
             document.querySelector('.panel-box:has(#colorPalette)').style.display = 'none';
             document.querySelector('.panel-box:has(.tabs)').style.display = 'none';
+            document.querySelector('.preview-panel').style.display = 'none';
             document.querySelector('.timeline-panel').style.display = 'none';
 
             document.getElementById('view-left-panel').textContent = '✗ Left Toolbar';
             document.getElementById('view-color-palette').textContent = '✗ Color Palette';
             document.getElementById('view-shapes-panel').textContent = '✗ Shapes/History';
+            document.getElementById('view-preview-panel').textContent = '✗ Preview';
             document.getElementById('view-timeline-panel').textContent = '✗ Timeline';
 
             viewState.leftPanel = false;
             viewState.colorPalette = false;
             viewState.shapesPanel = false;
+            viewState.previewPanel = false;
             viewState.timelinePanel = false;
         }
+    });
 
+    // Canvas Ratio
+    const updateRatioUI = () => {
+        ['1-1', '16-9', '4-3', '3-2'].forEach(ratio => {
+            const btn = document.getElementById(`canvas-ratio-${ratio}`);
+            if (btn) {
+                const currentRatio = window.editor.aspectRatio.replace(':', '-');
+                btn.textContent = ratio === currentRatio ? `● ${ratio.replace('-', ':')} ${ratio === '1-1' ? '(Square)' : ''}` : ratio.replace('-', ':');
+            }
+        });
+    };
+
+    document.getElementById('canvas-ratio-1-1')?.addEventListener('click', () => {
+        window.editor.aspectRatio = '1:1';
+        window.editor.updateCanvasDimensions();
+        updateRatioUI();
+    });
+
+    document.getElementById('canvas-ratio-16-9')?.addEventListener('click', () => {
+        window.editor.aspectRatio = '16:9';
+        window.editor.updateCanvasDimensions();
+        updateRatioUI();
+    });
+
+    document.getElementById('canvas-ratio-4-3')?.addEventListener('click', () => {
+        window.editor.aspectRatio = '4:3';
+        window.editor.updateCanvasDimensions();
+        updateRatioUI();
+    });
+
+    document.getElementById('canvas-ratio-3-2')?.addEventListener('click', () => {
+        window.editor.aspectRatio = '3:2';
+        window.editor.updateCanvasDimensions();
+        updateRatioUI();
+    });
+
+    // Canvas Orientation
+    const updateOrientationUI = () => {
+        const landscapeBtn = document.getElementById('canvas-orientation-landscape');
+        const portraitBtn = document.getElementById('canvas-orientation-portrait');
+        if (landscapeBtn) landscapeBtn.textContent = window.editor.orientation === 'landscape' ? '● Landscape' : 'Landscape';
+        if (portraitBtn) portraitBtn.textContent = window.editor.orientation === 'portrait' ? '● Portrait' : 'Portrait';
+    };
+
+    document.getElementById('canvas-orientation-landscape')?.addEventListener('click', () => {
+        window.editor.orientation = 'landscape';
+        window.editor.updateCanvasDimensions();
+        updateOrientationUI();
+    });
+
+    document.getElementById('canvas-orientation-portrait')?.addEventListener('click', () => {
+        window.editor.orientation = 'portrait';
+        window.editor.updateCanvasDimensions();
+        updateOrientationUI();
+    });
+
+    // Grid Size
+    const updateGridUI = () => {
+        ['off', '8', '16', '32', '64'].forEach(size => {
+            const btn = document.getElementById(`canvas-grid-${size}`);
+            if (btn) {
+                const currentGrid = size === 'off' ? 0 : parseInt(size);
+                const isActive = window.editor.gridCells === currentGrid;
+                btn.textContent = isActive ? `● ${size === 'off' ? 'Off' : size + '×' + size}` : (size === 'off' ? 'Off' : size + '×' + size);
+            }
+        });
+    };
+
+    document.getElementById('canvas-grid-off')?.addEventListener('click', () => {
+        window.editor.gridCells = 0;
+        window.editor.render();
+        updateGridUI();
+    });
+
+    document.getElementById('canvas-grid-8')?.addEventListener('click', () => {
+        window.editor.gridCells = 8;
+        window.editor.render();
+        updateGridUI();
+    });
+
+    document.getElementById('canvas-grid-16')?.addEventListener('click', () => {
+        window.editor.gridCells = 16;
+        window.editor.render();
+        updateGridUI();
+    });
+
+    document.getElementById('canvas-grid-32')?.addEventListener('click', () => {
+        window.editor.gridCells = 32;
+        window.editor.render();
+        updateGridUI();
+    });
+
+    document.getElementById('canvas-grid-64')?.addEventListener('click', () => {
+        window.editor.gridCells = 64;
+        window.editor.render();
+        updateGridUI();
+    });
+
+    // Initialize UI
+    updateRatioUI();
+    updateOrientationUI();
+    updateGridUI();
+
+    // Preview mode buttons
+    document.getElementById('preview-actual')?.addEventListener('click', function() {
+        document.getElementById('preview-actual').classList.add('active');
+        document.getElementById('preview-repeat').classList.remove('active');
+        window.editor.previewMode = 'actual';
+        window.editor.updatePreview();
+    });
+
+    document.getElementById('preview-repeat')?.addEventListener('click', function() {
+        document.getElementById('preview-repeat').classList.add('active');
+        document.getElementById('preview-actual').classList.remove('active');
+        window.editor.previewMode = 'repeat';
+        window.editor.updatePreview();
+    });
+
+    // Close all dropdowns when clicking outside
+    document.addEventListener('click', () => {
         dropdowns.forEach(d => d.classList.remove('open'));
     });
 });
