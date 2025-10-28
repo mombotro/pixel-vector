@@ -103,6 +103,24 @@ class VectorEditor {
         this.selectedDitherPattern = 0;
         this.ditherPatternSize = 8; // Each pattern is 8x8 pixels in the atlas
         this.ditherScale = 1; // Scale multiplier for dither patterns
+        this.invertDither = false; // Invert dither pattern
+
+        // Animation settings
+        // Each frame is an object: { shapes: [], name: '', hold: 1 }
+        this.frames = [{ shapes: [...this.shapes], name: 'Frame 1', hold: 1 }];
+        this.currentFrame = 0;
+        this.fps = 12; // Frames per second
+        this.isPlaying = false;
+        this.animationTimer = null;
+        this.loopMode = 'loop'; // 'loop', 'bounce', 'once'
+        this.bounceDirection = 1; // 1 for forward, -1 for backward (used in bounce mode)
+        this.frameHoldCounter = 0; // Counter for frame holds
+        this.draggedFrameIndex = null; // For drag and drop reordering
+
+        // Onion skinning settings
+        this.onionSkinEnabled = false;
+        this.onionSkinFrames = 1; // Number of frames before/after to show
+        this.onionSkinOpacity = 30; // Opacity percentage (0-100)
 
         this.init();
     }
@@ -113,6 +131,7 @@ class VectorEditor {
         this.updateCanvasDimensions();
         this.setupPreview();
         this.setupDither();
+        this.setupAnimation();
         this.render();
     }
 
@@ -145,6 +164,14 @@ class VectorEditor {
                 this.ditherScale = parseInt(e.target.value);
                 ditherScaleValue.textContent = this.ditherScale;
                 this.render(); // Re-render to show new scale
+            });
+        }
+
+        const ditherInvertCheckbox = document.getElementById('dither-invert');
+        if (ditherInvertCheckbox) {
+            ditherInvertCheckbox.addEventListener('change', (e) => {
+                this.invertDither = e.target.checked;
+                this.render(); // Re-render to show inverted pattern
             });
         }
 
@@ -244,11 +271,12 @@ class VectorEditor {
             return;
         }
 
-        console.log('Applying dither pattern', this.selectedDitherPattern, 'to', this.selectedShapes.length, 'shapes');
+        console.log('Applying dither pattern', this.selectedDitherPattern, 'to', this.selectedShapes.length, 'shapes', 'inverted:', this.invertDither);
 
         this.selectedShapes.forEach(shape => {
             shape.ditherPattern = this.selectedDitherPattern;
-            console.log('Applied dither to shape:', shape.type, 'ditherPattern:', shape.ditherPattern);
+            shape.invertDither = this.invertDither;
+            console.log('Applied dither to shape:', shape.type, 'ditherPattern:', shape.ditherPattern, 'inverted:', shape.invertDither);
         });
 
         this.saveHistory();
@@ -264,13 +292,14 @@ class VectorEditor {
 
         this.selectedShapes.forEach(shape => {
             delete shape.ditherPattern;
+            delete shape.invertDither;
         });
 
         this.saveHistory();
         this.render();
     }
 
-    applyDitherPattern(x, y, color, ditherPatternIndex) {
+    applyDitherPattern(x, y, color, ditherPatternIndex, invertDither = false) {
         if (ditherPatternIndex === undefined || ditherPatternIndex === null || !this.ditherPatterns[ditherPatternIndex]) {
             // No dither pattern, draw solid color
             this.ctx.fillStyle = color;
@@ -298,11 +327,437 @@ class VectorEditor {
         const r = pattern.data[patternIndex];
         const isOn = r > 128;
 
-        if (isOn) {
+        // Apply invert if requested
+        const shouldDraw = invertDither ? !isOn : isOn;
+
+        if (shouldDraw) {
             this.ctx.fillStyle = color;
             this.ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
         }
         // If off, don't draw (leave transparent or background)
+    }
+
+    setupAnimation() {
+        // Initialize frames with current shapes
+        this.frames = [{ shapes: JSON.parse(JSON.stringify(this.shapes)), name: 'Frame 1', hold: 1 }];
+        this.currentFrame = 0;
+
+        // Setup event listeners
+        document.getElementById('anim-play')?.addEventListener('click', () => {
+            this.togglePlayback();
+        });
+
+        document.getElementById('anim-stop')?.addEventListener('click', () => {
+            this.stopAnimation();
+        });
+
+        document.getElementById('anim-fps')?.addEventListener('change', (e) => {
+            this.fps = parseInt(e.target.value) || 12;
+            if (this.isPlaying) {
+                this.stopAnimation();
+                this.startAnimation();
+            }
+        });
+
+        document.getElementById('anim-loop-mode')?.addEventListener('change', (e) => {
+            this.loopMode = e.target.value;
+        });
+
+        document.getElementById('anim-add-frame')?.addEventListener('click', () => {
+            this.addFrame();
+        });
+
+        document.getElementById('anim-duplicate-frame')?.addEventListener('click', () => {
+            this.duplicateFrame();
+        });
+
+        document.getElementById('anim-delete-frame')?.addEventListener('click', () => {
+            this.deleteFrame();
+        });
+
+        // Onion skinning controls
+        document.getElementById('anim-onion-skin')?.addEventListener('change', (e) => {
+            this.onionSkinEnabled = e.target.checked;
+            this.render();
+        });
+
+        document.getElementById('anim-onion-frames')?.addEventListener('change', (e) => {
+            this.onionSkinFrames = parseInt(e.target.value) || 1;
+            this.render();
+        });
+
+        document.getElementById('anim-onion-opacity')?.addEventListener('change', (e) => {
+            this.onionSkinOpacity = parseInt(e.target.value) || 30;
+            this.render();
+        });
+
+        this.updateFrameThumbnails();
+    }
+
+    addFrame() {
+        // Add empty frame after current frame
+        const newFrameNumber = this.frames.length + 1;
+        this.frames.splice(this.currentFrame + 1, 0, {
+            shapes: [],
+            name: `Frame ${newFrameNumber}`,
+            hold: 1
+        });
+        this.currentFrame++;
+        this.shapes = [];
+        this.selectedShapes = [];
+        this.selectedShape = null;
+        this.saveCurrentFrame();
+        this.updateFrameThumbnails();
+        this.render();
+    }
+
+    duplicateFrame() {
+        // Duplicate current frame
+        const frameCopy = JSON.parse(JSON.stringify(this.frames[this.currentFrame]));
+        frameCopy.name = `${frameCopy.name} Copy`;
+        this.frames.splice(this.currentFrame + 1, 0, frameCopy);
+        this.currentFrame++;
+        this.loadFrame(this.currentFrame);
+        this.updateFrameThumbnails();
+    }
+
+    deleteFrame() {
+        if (this.frames.length <= 1) {
+            alert('Cannot delete the only frame');
+            return;
+        }
+        this.frames.splice(this.currentFrame, 1);
+        if (this.currentFrame >= this.frames.length) {
+            this.currentFrame = this.frames.length - 1;
+        }
+        this.loadFrame(this.currentFrame);
+        this.updateFrameThumbnails();
+    }
+
+    switchToFrame(frameIndex) {
+        if (frameIndex < 0 || frameIndex >= this.frames.length) return;
+        this.saveCurrentFrame();
+        this.currentFrame = frameIndex;
+        this.loadFrame(frameIndex);
+        this.updateFrameThumbnails();
+    }
+
+    saveCurrentFrame() {
+        // Save current shapes to current frame
+        this.frames[this.currentFrame].shapes = JSON.parse(JSON.stringify(this.shapes));
+    }
+
+    loadFrame(frameIndex) {
+        // Load shapes from frame
+        this.shapes = JSON.parse(JSON.stringify(this.frames[frameIndex].shapes));
+        this.selectedShapes = [];
+        this.selectedShape = null;
+        this.render();
+    }
+
+    updateFrameName(frameIndex, newName) {
+        if (frameIndex >= 0 && frameIndex < this.frames.length) {
+            this.frames[frameIndex].name = newName;
+            this.updateFrameThumbnails();
+        }
+    }
+
+    updateFrameHold(frameIndex, newHold) {
+        if (frameIndex >= 0 && frameIndex < this.frames.length) {
+            this.frames[frameIndex].hold = Math.max(1, parseInt(newHold) || 1);
+            this.updateFrameThumbnails();
+        }
+    }
+
+    reorderFrame(fromIndex, toIndex) {
+        if (fromIndex === toIndex) return;
+
+        // Save the frame being moved
+        const movedFrame = this.frames[fromIndex];
+
+        // Remove the frame from its original position
+        this.frames.splice(fromIndex, 1);
+
+        // Insert it at the new position
+        this.frames.splice(toIndex, 0, movedFrame);
+
+        // Update current frame index if necessary
+        if (this.currentFrame === fromIndex) {
+            // The current frame was moved
+            this.currentFrame = toIndex;
+        } else if (fromIndex < this.currentFrame && toIndex >= this.currentFrame) {
+            // Frame moved from before current to after/at current
+            this.currentFrame--;
+        } else if (fromIndex > this.currentFrame && toIndex <= this.currentFrame) {
+            // Frame moved from after current to before/at current
+            this.currentFrame++;
+        }
+
+        this.updateFrameThumbnails();
+        this.render();
+    }
+
+    togglePlayback() {
+        if (this.isPlaying) {
+            this.stopAnimation();
+        } else {
+            this.startAnimation();
+        }
+    }
+
+    startAnimation() {
+        if (this.frames.length <= 1) return;
+
+        this.isPlaying = true;
+        this.bounceDirection = 1;
+        this.frameHoldCounter = 0;
+        document.getElementById('anim-play').textContent = '⏸';
+
+        const interval = 1000 / this.fps;
+        this.animationTimer = setInterval(() => {
+            this.advanceFrame();
+        }, interval);
+    }
+
+    stopAnimation() {
+        this.isPlaying = false;
+        if (this.animationTimer) {
+            clearInterval(this.animationTimer);
+            this.animationTimer = null;
+        }
+        document.getElementById('anim-play').textContent = '▶';
+        // Return to frame 0
+        this.currentFrame = 0;
+        this.loadFrame(0);
+        this.updateFrameThumbnails();
+    }
+
+    advanceFrame() {
+        // Check if we need to hold the current frame longer
+        const currentHold = this.frames[this.currentFrame].hold;
+        this.frameHoldCounter++;
+
+        if (this.frameHoldCounter < currentHold) {
+            // Still holding this frame, don't advance yet
+            return;
+        }
+
+        // Reset hold counter for next frame
+        this.frameHoldCounter = 0;
+
+        // Advance to next frame
+        switch (this.loopMode) {
+            case 'loop':
+                this.currentFrame = (this.currentFrame + 1) % this.frames.length;
+                break;
+
+            case 'bounce':
+                this.currentFrame += this.bounceDirection;
+                if (this.currentFrame >= this.frames.length - 1) {
+                    this.bounceDirection = -1;
+                    this.currentFrame = this.frames.length - 1;
+                } else if (this.currentFrame <= 0) {
+                    this.bounceDirection = 1;
+                    this.currentFrame = 0;
+                }
+                break;
+
+            case 'once':
+                if (this.currentFrame < this.frames.length - 1) {
+                    this.currentFrame++;
+                } else {
+                    this.stopAnimation();
+                    return;
+                }
+                break;
+        }
+
+        this.loadFrame(this.currentFrame);
+        this.updateFrameThumbnails();
+    }
+
+    updateFrameThumbnails() {
+        const container = document.getElementById('frame-thumbnails');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        this.frames.forEach((frame, index) => {
+            const thumbnail = document.createElement('div');
+            thumbnail.draggable = true;
+            thumbnail.dataset.frameIndex = index;
+            thumbnail.style.cssText = `
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                gap: 8px;
+                cursor: grab;
+                padding: 6px;
+                border: 2px solid ${index === this.currentFrame ? '#e94560' : '#533483'};
+                border-radius: 4px;
+                background: ${index === this.currentFrame ? '#2a2a4e' : '#1a1a2e'};
+                width: 100%;
+                box-sizing: border-box;
+                transition: opacity 0.2s;
+            `;
+
+            // Create thumbnail canvas
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 64;
+            thumbCanvas.height = 64;
+            thumbCanvas.style.cssText = 'image-rendering: pixelated; border-radius: 2px;';
+            const thumbCtx = thumbCanvas.getContext('2d');
+
+            // Render frame to thumbnail
+            thumbCtx.fillStyle = this.backgroundColor;
+            thumbCtx.fillRect(0, 0, 64, 64);
+
+            const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+            const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+            const scaleX = 64 / this.canvasWidth;
+            const scaleY = 64 / this.canvasHeight;
+
+            thumbCtx.save();
+            thumbCtx.scale(scaleX, scaleY);
+
+            // Temporarily load frame for rendering
+            const savedShapes = this.shapes;
+            const savedCtx = this.ctx;
+            const savedScale = this.scale;
+
+            this.shapes = frame.shapes;
+            this.ctx = thumbCtx;
+            this.scale = 1;
+
+            frame.shapes.forEach(shape => {
+                this.drawShape(shape, false);
+            });
+
+            this.shapes = savedShapes;
+            this.ctx = savedCtx;
+            this.scale = savedScale;
+
+            thumbCtx.restore();
+
+            // Create info container for name and hold
+            const infoContainer = document.createElement('div');
+            infoContainer.style.cssText = 'display: flex; flex-direction: column; gap: 4px; flex: 1;';
+
+            // Add editable name input
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.value = frame.name;
+            nameInput.style.cssText = `
+                color: #fff;
+                font-size: 11px;
+                font-family: "Courier New", monospace;
+                background: #16213e;
+                border: 1px solid #533483;
+                border-radius: 3px;
+                padding: 2px 4px;
+                width: 100%;
+                box-sizing: border-box;
+            `;
+            nameInput.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent frame switch when clicking input
+            });
+            nameInput.addEventListener('change', (e) => {
+                this.updateFrameName(index, e.target.value);
+            });
+
+            // Add hold input
+            const holdContainer = document.createElement('div');
+            holdContainer.style.cssText = 'display: flex; align-items: center; gap: 4px;';
+
+            const holdLabel = document.createElement('span');
+            holdLabel.textContent = 'Hold:';
+            holdLabel.style.cssText = 'color: #e94560; font-size: 10px;';
+
+            const holdInput = document.createElement('input');
+            holdInput.type = 'number';
+            holdInput.min = '1';
+            holdInput.max = '60';
+            holdInput.value = frame.hold;
+            holdInput.style.cssText = `
+                color: #fff;
+                font-size: 10px;
+                font-family: "Courier New", monospace;
+                background: #16213e;
+                border: 1px solid #533483;
+                border-radius: 3px;
+                padding: 2px 4px;
+                width: 40px;
+            `;
+            holdInput.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent frame switch when clicking input
+            });
+            holdInput.addEventListener('change', (e) => {
+                this.updateFrameHold(index, e.target.value);
+            });
+
+            holdContainer.appendChild(holdLabel);
+            holdContainer.appendChild(holdInput);
+
+            infoContainer.appendChild(nameInput);
+            infoContainer.appendChild(holdContainer);
+
+            thumbnail.appendChild(thumbCanvas);
+            thumbnail.appendChild(infoContainer);
+
+            thumbnail.addEventListener('click', () => {
+                if (!this.isPlaying) {
+                    this.switchToFrame(index);
+                }
+            });
+
+            // Drag and drop event handlers
+            thumbnail.addEventListener('dragstart', (e) => {
+                this.draggedFrameIndex = index;
+                thumbnail.style.opacity = '0.5';
+                thumbnail.style.cursor = 'grabbing';
+                e.dataTransfer.effectAllowed = 'move';
+            });
+
+            thumbnail.addEventListener('dragend', (e) => {
+                thumbnail.style.opacity = '1';
+                thumbnail.style.cursor = 'grab';
+            });
+
+            thumbnail.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+
+                // Visual feedback - show where it will drop
+                const rect = thumbnail.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                if (e.clientY < midpoint) {
+                    thumbnail.style.borderTop = '3px solid #e94560';
+                    thumbnail.style.borderBottom = '';
+                } else {
+                    thumbnail.style.borderBottom = '3px solid #e94560';
+                    thumbnail.style.borderTop = '';
+                }
+            });
+
+            thumbnail.addEventListener('dragleave', (e) => {
+                thumbnail.style.borderTop = '';
+                thumbnail.style.borderBottom = '';
+            });
+
+            thumbnail.addEventListener('drop', (e) => {
+                e.preventDefault();
+                thumbnail.style.borderTop = '';
+                thumbnail.style.borderBottom = '';
+
+                const dropIndex = index;
+                if (this.draggedFrameIndex !== null && this.draggedFrameIndex !== dropIndex) {
+                    this.reorderFrame(this.draggedFrameIndex, dropIndex);
+                }
+                this.draggedFrameIndex = null;
+            });
+
+            container.appendChild(thumbnail);
+        });
     }
 
     updatePreview() {
@@ -718,6 +1173,13 @@ class VectorEditor {
             // Portrait - swap the ratios
             height = this.baseSize;
             width = Math.round(this.baseSize * heightRatio / widthRatio);
+        }
+
+        // If grid is enabled, round dimensions to be multiples of grid size
+        // This ensures each grid cell is a whole number of pixels
+        if (this.gridCells > 0) {
+            width = Math.round(width / this.gridCells) * this.gridCells;
+            height = Math.round(height / this.gridCells) * this.gridCells;
         }
 
         this.canvasWidth = width;
@@ -1193,6 +1655,10 @@ class VectorEditor {
         } else {
             this.historyIndex++;
         }
+
+        // Also save to current animation frame
+        this.saveCurrentFrame();
+        this.updateFrameThumbnails();
     }
 
 
@@ -2341,68 +2807,38 @@ class VectorEditor {
         const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
         const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
 
-        // Step 1: Render shapes to a temporary canvas (without background if transparent)
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = this.canvas.width;
-        tempCanvas.height = this.canvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
+        // Get the current canvas image data
+        const srcCanvas = transparent ? this.createTransparentRender() : this.canvas;
+        const srcData = srcCanvas.getContext('2d').getImageData(0, 0, srcCanvas.width, srcCanvas.height);
 
-        // Save original state
-        const savedCanvas = this.canvas;
-        const savedCtx = this.ctx;
-        const savedBgColor = this.backgroundColor;
-
-        // Temporarily set transparent background if needed
-        if (transparent) {
-            this.backgroundColor = 'rgba(0,0,0,0)';
-        }
-
-        // Set temp canvas as current
-        this.canvas = tempCanvas;
-        this.ctx = tempCtx;
-
-        // Render (this will call the normal render which includes background)
-        this.render();
-
-        // Restore original state
-        this.canvas = savedCanvas;
-        this.ctx = savedCtx;
-        this.backgroundColor = savedBgColor;
-
-        // Step 2: Downsample to pixel-perfect size using nearest-neighbor
+        // Downsample to pixel-perfect size
         const pixelCanvas = document.createElement('canvas');
         pixelCanvas.width = actualWidth;
         pixelCanvas.height = actualHeight;
         const pixelCtx = pixelCanvas.getContext('2d');
+        const dstData = pixelCtx.createImageData(actualWidth, actualHeight);
 
-        // Get source image data
-        const sourceData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
-        const destData = pixelCtx.createImageData(actualWidth, actualHeight);
+        const scaleX = srcCanvas.width / actualWidth;
+        const scaleY = srcCanvas.height / actualHeight;
 
-        // Calculate scaling ratios
-        const scaleX = tempCanvas.width / actualWidth;
-        const scaleY = tempCanvas.height / actualHeight;
+        // Nearest-neighbor downsampling
+        for (let dy = 0; dy < actualHeight; dy++) {
+            for (let dx = 0; dx < actualWidth; dx++) {
+                const sx = Math.floor((dx + 0.5) * scaleX);
+                const sy = Math.floor((dy + 0.5) * scaleY);
+                const srcIdx = (sy * srcCanvas.width + sx) * 4;
+                const dstIdx = (dy * actualWidth + dx) * 4;
 
-        // Nearest-neighbor downsampling - sample exact pixels
-        for (let y = 0; y < actualHeight; y++) {
-            for (let x = 0; x < actualWidth; x++) {
-                // Find the corresponding source pixel (center of the cell)
-                const srcX = Math.floor((x + 0.5) * scaleX);
-                const srcY = Math.floor((y + 0.5) * scaleY);
-
-                const srcIndex = (srcY * tempCanvas.width + srcX) * 4;
-                const destIndex = (y * actualWidth + x) * 4;
-
-                destData.data[destIndex] = sourceData.data[srcIndex];         // R
-                destData.data[destIndex + 1] = sourceData.data[srcIndex + 1]; // G
-                destData.data[destIndex + 2] = sourceData.data[srcIndex + 2]; // B
-                destData.data[destIndex + 3] = sourceData.data[srcIndex + 3]; // A
+                dstData.data[dstIdx] = srcData.data[srcIdx];
+                dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
+                dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
+                dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
             }
         }
 
-        pixelCtx.putImageData(destData, 0, 0);
+        pixelCtx.putImageData(dstData, 0, 0);
 
-        // Step 3: Scale up if needed for export scale
+        // Scale up if needed for export scale
         let finalCanvas = pixelCanvas;
         if (exportScale > 1) {
             finalCanvas = document.createElement('canvas');
@@ -2410,13 +2846,11 @@ class VectorEditor {
             finalCanvas.height = actualHeight * exportScale;
             const finalCtx = finalCanvas.getContext('2d');
 
-            // Disable image smoothing for crisp pixels
             finalCtx.imageSmoothingEnabled = false;
             finalCtx.mozImageSmoothingEnabled = false;
             finalCtx.webkitImageSmoothingEnabled = false;
             finalCtx.msImageSmoothingEnabled = false;
 
-            // Scale up the pixel-perfect canvas
             finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
         }
 
@@ -2431,54 +2865,65 @@ class VectorEditor {
         }, 'image/png');
     }
 
+    createTransparentRender() {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        const tempCtx = tempCanvas.getContext('2d');
+
+        const savedCtx = this.ctx;
+        const savedCanvas = this.canvas;
+        const savedBg = this.backgroundColor;
+
+        this.ctx = tempCtx;
+        this.canvas = tempCanvas;
+        this.backgroundColor = 'rgba(0,0,0,0)';
+
+        this.render();
+
+        this.ctx = savedCtx;
+        this.canvas = savedCanvas;
+        this.backgroundColor = savedBg;
+
+        return tempCanvas;
+    }
+
     exportJPG(exportScale = 1) {
         // Calculate pixel-perfect size
         const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
         const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
 
-        // Step 1: Copy the current canvas as-is
-        const fullCanvas = document.createElement('canvas');
-        fullCanvas.width = this.canvas.width;
-        fullCanvas.height = this.canvas.height;
-        const fullCtx = fullCanvas.getContext('2d');
+        // Get the current canvas image data
+        const srcData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
 
-        // Draw the current canvas content
-        fullCtx.drawImage(this.canvas, 0, 0);
-
-        // Step 2: Downsample to pixel-perfect size using nearest-neighbor
+        // Downsample to pixel-perfect size
         const pixelCanvas = document.createElement('canvas');
         pixelCanvas.width = actualWidth;
         pixelCanvas.height = actualHeight;
         const pixelCtx = pixelCanvas.getContext('2d');
+        const dstData = pixelCtx.createImageData(actualWidth, actualHeight);
 
-        // Get source image data
-        const sourceData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height);
-        const destData = pixelCtx.createImageData(actualWidth, actualHeight);
+        const scaleX = this.canvas.width / actualWidth;
+        const scaleY = this.canvas.height / actualHeight;
 
-        // Calculate scaling ratios
-        const scaleX = fullCanvas.width / actualWidth;
-        const scaleY = fullCanvas.height / actualHeight;
+        // Nearest-neighbor downsampling
+        for (let dy = 0; dy < actualHeight; dy++) {
+            for (let dx = 0; dx < actualWidth; dx++) {
+                const sx = Math.floor((dx + 0.5) * scaleX);
+                const sy = Math.floor((dy + 0.5) * scaleY);
+                const srcIdx = (sy * this.canvas.width + sx) * 4;
+                const dstIdx = (dy * actualWidth + dx) * 4;
 
-        // Nearest-neighbor downsampling - sample exact pixels
-        for (let y = 0; y < actualHeight; y++) {
-            for (let x = 0; x < actualWidth; x++) {
-                // Find the corresponding source pixel (center of the cell)
-                const srcX = Math.floor((x + 0.5) * scaleX);
-                const srcY = Math.floor((y + 0.5) * scaleY);
-
-                const srcIndex = (srcY * fullCanvas.width + srcX) * 4;
-                const destIndex = (y * actualWidth + x) * 4;
-
-                destData.data[destIndex] = sourceData.data[srcIndex];         // R
-                destData.data[destIndex + 1] = sourceData.data[srcIndex + 1]; // G
-                destData.data[destIndex + 2] = sourceData.data[srcIndex + 2]; // B
-                destData.data[destIndex + 3] = sourceData.data[srcIndex + 3]; // A
+                dstData.data[dstIdx] = srcData.data[srcIdx];
+                dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
+                dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
+                dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
             }
         }
 
-        pixelCtx.putImageData(destData, 0, 0);
+        pixelCtx.putImageData(dstData, 0, 0);
 
-        // Step 3: Scale up if needed for export scale
+        // Scale up if needed for export scale
         let finalCanvas = pixelCanvas;
         if (exportScale > 1) {
             finalCanvas = document.createElement('canvas');
@@ -2486,13 +2931,11 @@ class VectorEditor {
             finalCanvas.height = actualHeight * exportScale;
             const finalCtx = finalCanvas.getContext('2d');
 
-            // Disable image smoothing for crisp pixels
             finalCtx.imageSmoothingEnabled = false;
             finalCtx.mozImageSmoothingEnabled = false;
             finalCtx.webkitImageSmoothingEnabled = false;
             finalCtx.msImageSmoothingEnabled = false;
 
-            // Scale up the pixel-perfect canvas
             finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
         }
 
@@ -2505,6 +2948,362 @@ class VectorEditor {
             a.click();
             URL.revokeObjectURL(url);
         }, 'image/jpeg', 0.95);
+    }
+
+    showSpritesheetDialog() {
+        if (this.frames.length === 0) {
+            alert('No frames to export!');
+            return;
+        }
+
+        const modal = document.getElementById('exportModal');
+        const titleEl = document.getElementById('exportModalTitle');
+        const scaleInput = document.getElementById('exportScale');
+        const sizeSpan = document.getElementById('exportSize');
+        const transparentOption = document.getElementById('exportTransparencyOption');
+        const confirmBtn = document.getElementById('exportConfirm');
+        const cancelBtn = document.getElementById('exportCancel');
+
+        // Set title
+        titleEl.textContent = 'Export Spritesheet';
+        transparentOption.style.display = 'none';
+
+        // Calculate spritesheet dimensions
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+        const cols = Math.ceil(Math.sqrt(this.frames.length));
+        const rows = Math.ceil(this.frames.length / cols);
+
+        // Update size display
+        const updateSize = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            const totalWidth = actualWidth * cols * scale;
+            const totalHeight = actualHeight * rows * scale;
+            sizeSpan.textContent = `${totalWidth} × ${totalHeight} (${this.frames.length} frames, ${cols}×${rows} grid)`;
+        };
+
+        scaleInput.value = 1;
+        updateSize();
+
+        scaleInput.oninput = updateSize;
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Handle confirm
+        const handleConfirm = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            modal.style.display = 'none';
+            this.exportSpritesheet(scale);
+            cleanup();
+        };
+
+        // Handle cancel
+        const handleCancel = () => {
+            modal.style.display = 'none';
+            cleanup();
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            scaleInput.oninput = null;
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    }
+
+    exportSpritesheet(exportScale = 1) {
+        if (this.frames.length === 0) {
+            alert('No frames to export!');
+            return;
+        }
+
+        // Calculate pixel-perfect size for each frame
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        // Calculate spritesheet dimensions (horizontal layout)
+        const cols = Math.ceil(Math.sqrt(this.frames.length));
+        const rows = Math.ceil(this.frames.length / cols);
+        const spritesheetWidth = actualWidth * cols * exportScale;
+        const spritesheetHeight = actualHeight * rows * exportScale;
+
+        // Create spritesheet canvas
+        const spritesheetCanvas = document.createElement('canvas');
+        spritesheetCanvas.width = spritesheetWidth;
+        spritesheetCanvas.height = spritesheetHeight;
+        const spritesheetCtx = spritesheetCanvas.getContext('2d');
+
+        // Disable image smoothing for pixel-perfect rendering
+        spritesheetCtx.imageSmoothingEnabled = false;
+        spritesheetCtx.mozImageSmoothingEnabled = false;
+        spritesheetCtx.webkitImageSmoothingEnabled = false;
+        spritesheetCtx.msImageSmoothingEnabled = false;
+
+        // Fill with transparent background
+        spritesheetCtx.clearRect(0, 0, spritesheetWidth, spritesheetHeight);
+
+        // Render each frame to the spritesheet
+        const savedShapes = this.shapes;
+        const savedCtx = this.ctx;
+        const savedCanvas = this.canvas;
+        const savedScale = this.scale;
+
+        this.frames.forEach((frame, index) => {
+            const col = index % cols;
+            const row = Math.floor(index / cols);
+            const x = col * actualWidth * exportScale;
+            const y = row * actualHeight * exportScale;
+
+            // Create temporary canvas for this frame
+            const frameCanvas = document.createElement('canvas');
+            frameCanvas.width = this.canvas.width;
+            frameCanvas.height = this.canvas.height;
+            const frameCtx = frameCanvas.getContext('2d');
+
+            // Render frame with background
+            frameCtx.fillStyle = this.backgroundColor;
+            frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+
+            // Temporarily switch context to render this frame
+            this.ctx = frameCtx;
+            this.canvas = frameCanvas;
+            this.shapes = frame.shapes;
+
+            frame.shapes.forEach(shape => {
+                this.drawShape(shape, false);
+            });
+
+            // Downsample frame to pixel-perfect size
+            const srcData = frameCtx.getImageData(0, 0, frameCanvas.width, frameCanvas.height);
+            const framePixelCanvas = document.createElement('canvas');
+            framePixelCanvas.width = actualWidth;
+            framePixelCanvas.height = actualHeight;
+            const framePixelCtx = framePixelCanvas.getContext('2d');
+            const dstData = framePixelCtx.createImageData(actualWidth, actualHeight);
+
+            const scaleX = frameCanvas.width / actualWidth;
+            const scaleY = frameCanvas.height / actualHeight;
+
+            for (let dy = 0; dy < actualHeight; dy++) {
+                for (let dx = 0; dx < actualWidth; dx++) {
+                    const sx = Math.floor((dx + 0.5) * scaleX);
+                    const sy = Math.floor((dy + 0.5) * scaleY);
+                    const srcIdx = (sy * frameCanvas.width + sx) * 4;
+                    const dstIdx = (dy * actualWidth + dx) * 4;
+
+                    dstData.data[dstIdx] = srcData.data[srcIdx];
+                    dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
+                    dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
+                    dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
+                }
+            }
+
+            framePixelCtx.putImageData(dstData, 0, 0);
+
+            // Scale up if needed
+            if (exportScale > 1) {
+                const scaledCanvas = document.createElement('canvas');
+                scaledCanvas.width = actualWidth * exportScale;
+                scaledCanvas.height = actualHeight * exportScale;
+                const scaledCtx = scaledCanvas.getContext('2d');
+
+                scaledCtx.imageSmoothingEnabled = false;
+                scaledCtx.mozImageSmoothingEnabled = false;
+                scaledCtx.webkitImageSmoothingEnabled = false;
+                scaledCtx.msImageSmoothingEnabled = false;
+
+                scaledCtx.drawImage(framePixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
+
+                // Draw the scaled frame onto the spritesheet
+                spritesheetCtx.drawImage(scaledCanvas, x, y);
+            } else {
+                // Draw the frame onto the spritesheet
+                spritesheetCtx.drawImage(framePixelCanvas, x, y);
+            }
+        });
+
+        // Restore original state
+        this.shapes = savedShapes;
+        this.ctx = savedCtx;
+        this.canvas = savedCanvas;
+        this.scale = savedScale;
+
+        // Download the spritesheet
+        spritesheetCanvas.toBlob((blob) => {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `spritesheet-${cols}x${rows}.png`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }, 'image/png');
+    }
+
+    exportGIF() {
+        if (this.frames.length === 0) {
+            alert('No frames to export!');
+            return;
+        }
+
+        if (typeof GIF === 'undefined') {
+            alert('GIF library not loaded! Please refresh the page.');
+            console.error('GIF library (gif.js) is not loaded');
+            return;
+        }
+
+        console.log('Starting GIF export...');
+        console.log(`Frames: ${this.frames.length}, FPS: ${this.fps}`);
+
+        // Calculate pixel-perfect size
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+
+        console.log(`GIF dimensions: ${actualWidth}x${actualHeight}`);
+
+        // Create GIF encoder
+        // Auto-detect if we're running from file:// or http(s)://
+        const isLocalFile = window.location.protocol === 'file:';
+        const gifConfig = {
+            quality: 10,
+            width: actualWidth,
+            height: actualHeight
+        };
+
+        if (isLocalFile) {
+            // Running locally - disable workers to avoid CORS
+            gifConfig.workers = 0;
+            console.log('Running from local file - using main thread for GIF encoding');
+        } else {
+            // Running on a server (GitHub Pages, etc.) - use workers for better performance
+            gifConfig.workers = 2;
+            gifConfig.workerScript = 'https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js';
+            console.log('Running on server - using web workers for GIF encoding');
+        }
+
+        try {
+            const gif = new GIF(gifConfig);
+
+            // Add error handler
+            gif.on('error', (error) => {
+                console.error('GIF encoding error:', error);
+                alert('Error encoding GIF: ' + error.message);
+            });
+
+            // Save original state
+            const savedShapes = this.shapes;
+            const savedCtx = this.ctx;
+            const savedCanvas = this.canvas;
+            const savedScale = this.scale;
+
+            // Calculate delay per frame (in milliseconds)
+            const baseDelay = Math.round(1000 / this.fps);
+
+            console.log(`Base delay per frame: ${baseDelay}ms`);
+
+            // Add each frame to the GIF (respecting frame holds)
+            this.frames.forEach((frame, index) => {
+                console.log(`Processing frame ${index + 1}/${this.frames.length}...`);
+                // Create temporary canvas for this frame
+                const frameCanvas = document.createElement('canvas');
+                frameCanvas.width = this.canvas.width;
+                frameCanvas.height = this.canvas.height;
+                const frameCtx = frameCanvas.getContext('2d');
+
+                // Render frame with background
+                frameCtx.fillStyle = this.backgroundColor;
+                frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+
+                // Temporarily switch context to render this frame
+                this.ctx = frameCtx;
+                this.canvas = frameCanvas;
+                this.shapes = frame.shapes;
+
+                frame.shapes.forEach(shape => {
+                    this.drawShape(shape, false);
+                });
+
+                // Downsample frame to pixel-perfect size
+                const srcData = frameCtx.getImageData(0, 0, frameCanvas.width, frameCanvas.height);
+                const framePixelCanvas = document.createElement('canvas');
+                framePixelCanvas.width = actualWidth;
+                framePixelCanvas.height = actualHeight;
+                const framePixelCtx = framePixelCanvas.getContext('2d');
+                const dstData = framePixelCtx.createImageData(actualWidth, actualHeight);
+
+                const scaleX = frameCanvas.width / actualWidth;
+                const scaleY = frameCanvas.height / actualHeight;
+
+                for (let dy = 0; dy < actualHeight; dy++) {
+                    for (let dx = 0; dx < actualWidth; dx++) {
+                        const sx = Math.floor((dx + 0.5) * scaleX);
+                        const sy = Math.floor((dy + 0.5) * scaleY);
+                        const srcIdx = (sy * frameCanvas.width + sx) * 4;
+                        const dstIdx = (dy * actualWidth + dx) * 4;
+
+                        dstData.data[dstIdx] = srcData.data[srcIdx];
+                        dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
+                        dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
+                        dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
+                    }
+                }
+
+                framePixelCtx.putImageData(dstData, 0, 0);
+
+                // Add frame to GIF with delay based on hold value
+                const frameDelay = baseDelay * (frame.hold || 1);
+                console.log(`Adding frame ${index + 1} with delay ${frameDelay}ms (hold: ${frame.hold})`);
+                gif.addFrame(framePixelCanvas, { delay: frameDelay });
+            });
+
+            // Restore original state
+            this.shapes = savedShapes;
+            this.ctx = savedCtx;
+            this.canvas = savedCanvas;
+            this.scale = savedScale;
+
+            // Show progress message
+            console.log('All frames added. Starting GIF encoding...');
+
+            // Alert user that encoding is happening (only when running locally without workers)
+            if (isLocalFile) {
+                alert('GIF encoding started. This may take a moment (running in main thread)...');
+            }
+
+            // Render and download the GIF
+            gif.on('finished', (blob) => {
+                console.log('GIF encoding finished!');
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'animation.gif';
+                a.click();
+                URL.revokeObjectURL(url);
+                console.log('GIF download started!');
+            });
+
+            // Add progress handler for server mode
+            if (!isLocalFile) {
+                gif.on('progress', (progress) => {
+                    console.log(`GIF encoding progress: ${Math.round(progress * 100)}%`);
+                });
+            }
+
+            // Use setTimeout to allow the alert to show before blocking (local mode only)
+            if (isLocalFile) {
+                setTimeout(() => {
+                    gif.render();
+                }, 100);
+            } else {
+                gif.render();
+            }
+
+        } catch (error) {
+            console.error('Error creating/encoding GIF:', error);
+            alert('Failed to export GIF: ' + error.message);
+        }
     }
 
     handleKeyDown(e) {
@@ -2661,6 +3460,84 @@ class VectorEditor {
         }
     }
 
+    drawOnionSkin() {
+        const baseOpacity = this.onionSkinOpacity / 100;
+
+        // Draw previous frames (red/orange tint)
+        for (let i = 1; i <= this.onionSkinFrames; i++) {
+            const frameIndex = this.currentFrame - i;
+            if (frameIndex < 0) break;
+
+            const frame = this.frames[frameIndex];
+            const opacity = baseOpacity * (1 - (i - 1) / this.onionSkinFrames);
+
+            this.ctx.save();
+            this.ctx.globalAlpha = opacity;
+
+            // Draw each shape in the frame with a red tint
+            frame.shapes.forEach(shape => {
+                // Create a modified version of the shape with red tint
+                const tintedShape = { ...shape };
+                // Save original color
+                const originalColor = this.colors[shape.color];
+
+                // Create red-tinted version
+                const r = Math.min(255, parseInt(originalColor.slice(1, 3), 16) + 80);
+                const g = Math.max(0, parseInt(originalColor.slice(3, 5), 16) - 30);
+                const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
+                const tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
+                // Temporarily modify the color palette
+                const savedColor = this.colors[shape.color];
+                this.colors[shape.color] = tintedColor;
+
+                this.drawShape(tintedShape, false);
+
+                // Restore original color
+                this.colors[shape.color] = savedColor;
+            });
+
+            this.ctx.restore();
+        }
+
+        // Draw next frames (green/blue tint)
+        for (let i = 1; i <= this.onionSkinFrames; i++) {
+            const frameIndex = this.currentFrame + i;
+            if (frameIndex >= this.frames.length) break;
+
+            const frame = this.frames[frameIndex];
+            const opacity = baseOpacity * (1 - (i - 1) / this.onionSkinFrames);
+
+            this.ctx.save();
+            this.ctx.globalAlpha = opacity;
+
+            // Draw each shape in the frame with a green tint
+            frame.shapes.forEach(shape => {
+                // Create a modified version of the shape with green tint
+                const tintedShape = { ...shape };
+                // Save original color
+                const originalColor = this.colors[shape.color];
+
+                // Create green-tinted version
+                const r = Math.max(0, parseInt(originalColor.slice(1, 3), 16) - 30);
+                const g = Math.min(255, parseInt(originalColor.slice(3, 5), 16) + 80);
+                const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
+                const tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+
+                // Temporarily modify the color palette
+                const savedColor = this.colors[shape.color];
+                this.colors[shape.color] = tintedColor;
+
+                this.drawShape(tintedShape, false);
+
+                // Restore original color
+                this.colors[shape.color] = savedColor;
+            });
+
+            this.ctx.restore();
+        }
+    }
+
     render() {
         // Clear canvas with background color
         this.ctx.fillStyle = this.backgroundColor;
@@ -2669,6 +3546,11 @@ class VectorEditor {
         // Draw grid if enabled
         if (this.showGrid && this.gridCells > 0) {
             this.drawGrid();
+        }
+
+        // Draw onion skinning (previous and next frames with transparency)
+        if (this.onionSkinEnabled && this.frames.length > 1) {
+            this.drawOnionSkin();
         }
 
         // Draw all shapes
@@ -2763,9 +3645,10 @@ class VectorEditor {
         const lineWidth = shape.lineWidth || 1;
         const outline = shape.outline || false;
         const ditherPattern = shape.ditherPattern;
+        const invertDither = shape.invertDither || false;
 
         if (ditherPattern !== undefined && ditherPattern !== null) {
-            console.log('Drawing shape with dither:', shape.type, 'pattern:', ditherPattern);
+            console.log('Drawing shape with dither:', shape.type, 'pattern:', ditherPattern, 'inverted:', invertDither);
         }
 
         const prevCtx = this.ctx;
@@ -2775,25 +3658,25 @@ class VectorEditor {
 
         switch (shape.type) {
             case 'line':
-                this.drawLine(shape.points, color, lineWidth);
+                this.drawLine(shape.points, color, lineWidth, ditherPattern, invertDither);
                 break;
             case 'rect':
-                this.drawRect(shape.points, color, lineWidth, outline, ditherPattern);
+                this.drawRect(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
             case 'circle':
-                this.drawCircle(shape.points, color, lineWidth, outline, ditherPattern);
+                this.drawCircle(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
             case 'oval':
-                this.drawOval(shape.points, color, lineWidth, outline, ditherPattern);
+                this.drawOval(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
             case 'triangle':
-                this.drawTriangle(shape.points, color, lineWidth, outline, ditherPattern);
+                this.drawTriangle(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
             case 'polygon':
-                this.drawPolygon(shape.points, color, lineWidth, outline, ditherPattern);
+                this.drawPolygon(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
             case 'fill':
-                this.drawFill(shape.points[0], color, ditherPattern);
+                this.drawFill(shape.points[0], color, ditherPattern, invertDither);
                 break;
         }
 
@@ -2801,7 +3684,7 @@ class VectorEditor {
         this.scale = prevScale;
     }
 
-    drawFill(point, color, ditherPattern = undefined) {
+    drawFill(point, color, ditherPattern = undefined, invertDither = false) {
         const cellSize = this.getCellSize();
 
         if (cellSize > 0) {
@@ -2816,7 +3699,7 @@ class VectorEditor {
                 // Apply dither pattern pixel by pixel
                 for (let py = 0; py < cellPixelSize; py++) {
                     for (let px = 0; px < cellPixelSize; px++) {
-                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern, invertDither);
                     }
                 }
             } else {
@@ -2832,7 +3715,7 @@ class VectorEditor {
             if (ditherPattern !== undefined && ditherPattern !== null) {
                 for (let py = -halfSize; py < halfSize; py++) {
                     for (let px = -halfSize; px < halfSize; px++) {
-                        this.applyDitherPattern(point.x + px, point.y + py, color, ditherPattern);
+                        this.applyDitherPattern(point.x + px, point.y + py, color, ditherPattern, invertDither);
                     }
                 }
             } else {
@@ -2845,7 +3728,7 @@ class VectorEditor {
     }
 
     // Bresenham line algorithm for pixel-perfect lines with width support
-    drawLine(points, color, lineWidth = 1, ditherPattern = undefined) {
+    drawLine(points, color, lineWidth = 1, ditherPattern = undefined, invertDither = false) {
         let x0 = Math.floor(points[0].x);
         let y0 = Math.floor(points[0].y);
         let x1 = Math.floor(points[1].x);
@@ -2882,7 +3765,7 @@ class VectorEditor {
                         const pixelY = cy * cellSize;
                         for (let py = 0; py < cellSize; py++) {
                             for (let px = 0; px < cellSize; px++) {
-                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern, invertDither);
                             }
                         }
                     } else {
@@ -2915,7 +3798,7 @@ class VectorEditor {
                 // Draw thick line by drawing a circle of pixels at each point
                 if (lineWidth === 1) {
                     if (ditherPattern !== undefined && ditherPattern !== null) {
-                        this.applyDitherPattern(x0, y0, color, ditherPattern);
+                        this.applyDitherPattern(x0, y0, color, ditherPattern, invertDither);
                     } else {
                         this.setPixel(x0, y0, color);
                     }
@@ -2927,7 +3810,7 @@ class VectorEditor {
                             // Circle equation
                             if (dx * dx + dy * dy <= radius * radius) {
                                 if (ditherPattern !== undefined && ditherPattern !== null) {
-                                    this.applyDitherPattern(x0 + dx, y0 + dy, color, ditherPattern);
+                                    this.applyDitherPattern(x0 + dx, y0 + dy, color, ditherPattern, invertDither);
                                 } else {
                                     this.setPixel(x0 + dx, y0 + dy, color);
                                 }
@@ -2950,7 +3833,7 @@ class VectorEditor {
         }
     }
 
-    drawRect(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
+    drawRect(points, color, lineWidth = 1, outline = false, ditherPattern = undefined, invertDither = false) {
         const x1 = Math.floor(Math.min(points[0].x, points[1].x));
         const y1 = Math.floor(Math.min(points[0].y, points[1].y));
         const x2 = Math.floor(Math.max(points[0].x, points[1].x));
@@ -2981,7 +3864,7 @@ class VectorEditor {
                         const pixelY = cy * cellSize;
                         for (let py = 0; py < cellSize; py++) {
                             for (let px = 0; px < cellSize; px++) {
-                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                                this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern, invertDither);
                             }
                         }
                     } else {
@@ -2995,7 +3878,7 @@ class VectorEditor {
             for (let y = y1; y <= y2; y++) {
                 for (let x = x1; x <= x2; x++) {
                     if (ditherPattern !== undefined && ditherPattern !== null) {
-                        this.applyDitherPattern(x, y, color, ditherPattern);
+                        this.applyDitherPattern(x, y, color, ditherPattern, invertDither);
                     } else {
                         this.setPixel(x, y, color);
                     }
@@ -3005,7 +3888,7 @@ class VectorEditor {
     }
 
     // Midpoint circle algorithm for pixel-perfect circles
-    drawCircle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
+    drawCircle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined, invertDither = false) {
         const cx = Math.floor(points[0].x);
         const cy = Math.floor(points[0].y);
         const dx = points[1].x - points[0].x;
@@ -3063,7 +3946,7 @@ class VectorEditor {
                     const cellKey = `${Math.floor(px / cellSize)},${Math.floor(py / cellSize)}`;
                     if (!filledCells.has(cellKey)) {
                         filledCells.add(cellKey);
-                        this.fillGridCell(px, py, color, ditherPattern);
+                        this.fillGridCell(px, py, color, ditherPattern, invertDither);
                     }
                 }
             }
@@ -3072,7 +3955,7 @@ class VectorEditor {
                 const width = Math.floor(Math.sqrt(radius * radius - y * y));
                 for (let x = -width; x <= width; x++) {
                     if (ditherPattern !== undefined && ditherPattern !== null) {
-                        this.applyDitherPattern(cx + x, cy + y, color, ditherPattern);
+                        this.applyDitherPattern(cx + x, cy + y, color, ditherPattern, invertDither);
                     } else {
                         this.setPixel(cx + x, cy + y, color);
                     }
@@ -3081,7 +3964,7 @@ class VectorEditor {
         }
     }
 
-    drawOval(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
+    drawOval(points, color, lineWidth = 1, outline = false, ditherPattern = undefined, invertDither = false) {
         // Define oval by two corners (bounding box)
         const x1 = Math.floor(Math.min(points[0].x, points[1].x));
         const y1 = Math.floor(Math.min(points[0].y, points[1].y));
@@ -3157,7 +4040,7 @@ class VectorEditor {
                         const cellKey = `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
                         if (!filledCells.has(cellKey)) {
                             filledCells.add(cellKey);
-                            this.fillGridCell(x, y, color, ditherPattern);
+                            this.fillGridCell(x, y, color, ditherPattern, invertDither);
                         }
                     }
                 }
@@ -3172,7 +4055,7 @@ class VectorEditor {
 
                     for (let x = xStart; x <= xEnd; x++) {
                         if (ditherPattern !== undefined && ditherPattern !== null) {
-                            this.applyDitherPattern(x, y, color, ditherPattern);
+                            this.applyDitherPattern(x, y, color, ditherPattern, invertDither);
                         } else {
                             this.setPixel(x, y, color);
                         }
@@ -3182,7 +4065,7 @@ class VectorEditor {
         }
     }
 
-    drawTriangle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
+    drawTriangle(points, color, lineWidth = 1, outline = false, ditherPattern = undefined, invertDither = false) {
         if (outline) {
             // Draw outline - three lines
             this.drawLine([points[0], points[1]], color, lineWidth);
@@ -3191,10 +4074,10 @@ class VectorEditor {
             return;
         }
         // Fill triangle using scanline algorithm
-        this.fillPolygon([points[0], points[1], points[2]], color, lineWidth, ditherPattern);
+        this.fillPolygon([points[0], points[1], points[2]], color, lineWidth, ditherPattern, invertDither);
     }
 
-    drawPolygon(points, color, lineWidth = 1, outline = false, ditherPattern = undefined) {
+    drawPolygon(points, color, lineWidth = 1, outline = false, ditherPattern = undefined, invertDither = false) {
         if (points.length < 3) return;
 
         if (outline) {
@@ -3206,11 +4089,11 @@ class VectorEditor {
             return;
         }
 
-        this.fillPolygon(points, color, lineWidth, ditherPattern);
+        this.fillPolygon(points, color, lineWidth, ditherPattern, invertDither);
     }
 
     // Scanline polygon fill algorithm
-    fillPolygon(points, color, lineWidth = 1, ditherPattern = undefined) {
+    fillPolygon(points, color, lineWidth = 1, ditherPattern = undefined, invertDither = false) {
         if (points.length < 3) return;
 
         // Find bounding box
@@ -3263,7 +4146,7 @@ class VectorEditor {
                                 const pixelY = cellY * cellSize;
                                 for (let py = 0; py < cellSize; py++) {
                                     for (let px = 0; px < cellSize; px++) {
-                                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern);
+                                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern, invertDither);
                                     }
                                 }
                             } else {
@@ -3275,7 +4158,7 @@ class VectorEditor {
                     } else {
                         for (let x = intersections[i]; x <= intersections[i + 1]; x++) {
                             if (ditherPattern !== undefined && ditherPattern !== null) {
-                                this.applyDitherPattern(x, y, color, ditherPattern);
+                                this.applyDitherPattern(x, y, color, ditherPattern, invertDither);
                             } else {
                                 this.setPixel(x, y, color);
                             }
@@ -3293,11 +4176,11 @@ class VectorEditor {
     }
 
     // Fill an entire grid cell at the given position
-    fillGridCell(x, y, color, ditherPattern = undefined) {
+    fillGridCell(x, y, color, ditherPattern = undefined, invertDither = false) {
         const cellSize = this.getCellSize();
         if (cellSize <= 0) {
             if (ditherPattern !== undefined && ditherPattern !== null) {
-                this.applyDitherPattern(x, y, color, ditherPattern);
+                this.applyDitherPattern(x, y, color, ditherPattern, invertDither);
             } else {
                 this.setPixel(x, y, color);
             }
@@ -3312,7 +4195,7 @@ class VectorEditor {
         if (ditherPattern !== undefined && ditherPattern !== null) {
             for (let py = 0; py < cellSize; py++) {
                 for (let px = 0; px < cellSize; px++) {
-                    this.applyDitherPattern(cellX + px, cellY + py, color, ditherPattern);
+                    this.applyDitherPattern(cellX + px, cellY + py, color, ditherPattern, invertDither);
                 }
             }
         } else {
@@ -3976,6 +4859,8 @@ document.addEventListener('DOMContentLoaded', () => {
         'menu-load': () => window.editor.load(),
         'menu-export-png': () => window.editor.showExportDialog('png'),
         'menu-export-jpg': () => window.editor.showExportDialog('jpg'),
+        'menu-export-gif': () => window.editor.exportGIF(),
+        'menu-export-spritesheet': () => window.editor.showSpritesheetDialog(),
         'menu-clear': () => window.editor.clear(),
         'menu-undo': () => window.editor.undo(),
         'menu-redo': () => window.editor.redo(),
