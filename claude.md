@@ -1,7 +1,7 @@
-# Vexel Edit - Development Notes
+# Azirona Vexel Edit - Development Notes
 
 ## Project Overview
-Vexel Edit is a vector pixel art editor that allows users to create pixel-perfect artwork using vector shapes that snap to a grid. It combines the precision of vector graphics with the aesthetic of pixel art.
+Azirona Vexel Edit is a vector-based pixel art editor that allows users to create pixel-perfect artwork using vector shapes that snap to a grid. It combines the precision of vector graphics with the aesthetic of pixel art. Unlike traditional raster pixel editors, this tool uses vector shapes that can be easily edited, moved, and manipulated without losing quality.
 
 ## Key Features
 
@@ -14,12 +14,12 @@ Vexel Edit is a vector pixel art editor that allows users to create pixel-perfec
 ### Drawing Tools
 - **Line**: Bresenham algorithm for pixel-perfect lines
 - **Rectangle**: Filled and outline modes
-- **Circle**: Pixel-perfect circles using midpoint algorithm
+- **Circle**: Pixel-perfect circles using dual-direction sweeping (fixes outline gaps)
 - **Oval**: Ellipse rendering
 - **Triangle**: 3-point polygon
 - **Polygon**: Multi-point shapes with node editing
-- **Fill**: Flood fill tool
-- **Select**: Node editing, multi-selection, shape manipulation
+- **Draw**: Freehand drawing tool that auto-simplifies to vector paths (tolerance 0.5)
+- **Select**: Node editing, multi-selection, shape manipulation (15px tolerance for line selection)
 
 ### Shape Operations
 - **Boolean Operations**: Union, Subtract, Intersect (Ctrl+Shift+U/B/I)
@@ -30,16 +30,20 @@ Vexel Edit is a vector pixel art editor that allows users to create pixel-perfec
 ### Dither Patterns
 - 19 built-in dither patterns (from solid to sparse)
 - Patterns are 8×8 repeating tiles
-- Scale control (1-16x) for pattern size
+- Scale control (1-32x) for pattern size
+- Auto-adjusts based on grid size: 8px grid→32x, 16px→16x, 32px→8x (default), 64px→4x
 - Invert option to flip pattern (on pixels become off, vice versa)
 - Applied per-shape basis
 - Works with all shape types including lines
 
 ### Color System
-- 32-color palette based on Lospec palettes
-- Color picker for each palette slot
+- Multiple built-in palettes (Lospec-based and retro system palettes)
+- **Retro System Palettes**: NES (32 colors), C64 (16 colors), CGA (16 colors), ZX Spectrum (16 colors), Apple II (16 colors), Amstrad CPC (27 colors)
+- **Custom Palette Creation**: Create and edit custom palettes with color picker
+- Color picker for each palette slot with × button to remove colors
 - Background color selection
 - Named palette support
+- **Palette Save/Load**: Save custom palettes separately or with project files
 
 ### History & Undo
 - Undo: Ctrl+Z
@@ -106,6 +110,7 @@ for (let y = 0; y < actualHeight; y++) {
 - **Frame holds**: Hold frames for multiple ticks (1-60), multiplies frame duration
 - **Onion skinning**:
   - Shows previous frames (red tint) and next frames (green tint)
+  - Wraps to beginning/end for looping animations (blue tint for wrapped frames)
   - Adjustable: 1-5 frames before/after
   - Adjustable opacity: 10-90%
   - Fading opacity based on distance from current frame
@@ -122,6 +127,8 @@ for (let y = 0; y < actualHeight; y++) {
 - Click to select shapes
 - Drag to reorder layers
 - Shows shape type and color
+- Inline renaming with contenteditable
+- Improved styling with proper padding and box-sizing
 
 ## Code Architecture
 
@@ -147,7 +154,7 @@ Main editor singleton with properties:
 
 **Dither System:**
 - `ditherPatterns`: Array of 8×8 ImageData patterns
-- `ditherScale`: Dither pattern scale multiplier (1-16)
+- `ditherScale`: Dither pattern scale multiplier (1-32, default 8x for 32px grid)
 - `invertDither`: Boolean to invert dither patterns
 
 **Animation System:**
@@ -168,15 +175,17 @@ Main editor singleton with properties:
 #### Shape Object Structure
 ```javascript
 {
-    type: 'line'|'rect'|'circle'|'oval'|'triangle'|'polygon'|'fill',
+    type: 'line'|'rect'|'circle'|'oval'|'triangle'|'polygon',
     points: [{x, y}, ...],
-    color: 0-31, // palette index
+    color: 0-31, // palette index (size varies by palette)
     lineWidth: 1,
     outline: true|false,
     ditherPattern: 0-18, // optional
     invertDither: true|false // optional, inverts dither pattern
 }
 ```
+
+Note: The 'draw' tool creates 'line' type shapes with auto-simplified points.
 
 #### Frame Object Structure
 ```javascript
@@ -262,11 +271,12 @@ Onion skinning render:
 ### Event Handling
 
 #### Keyboard Shortcuts
-- **Tools**: 1-6 for shapes, V for select, F for fill
+- **Tools**: 1-6 for shapes, V for select, D for draw
 - **Operations**: Ctrl+C/V (copy/paste), Del (delete)
 - **Boolean**: Ctrl+Shift+U/B/I (union/subtract/intersect)
 - **History**: Ctrl+Z (undo), Ctrl+Y (redo)
 - **Nodes**: Ctrl+Shift+M (merge nodes), Ctrl+Shift+P (to polygon)
+- **Simplify**: Ctrl+Shift+S (simplify polygon, tolerance 2.0)
 - **View**: G (grid), O (outline), Z (zen mode), H (lock horizontal)
 - **Ordering**: [ (back), ] (front)
 
@@ -287,41 +297,47 @@ Onion skinning render:
    - Grid space: Divided by `getCellSize()` for grid snapping
    - Export space: Downsampled to actual pixel size
 
-4. **Dither Pattern Generation**: Patterns are created programmatically in `createDitherPatterns()` to avoid CORS issues with loading images. Supports invert mode for all patterns.
+4. **Dither Pattern Generation**: Patterns are created programmatically in `createDitherPatterns()` to avoid CORS issues with loading images. Supports invert mode for all patterns. Scale auto-adjusts based on grid size.
 
-5. **Fill Tool**: Uses flood fill algorithm but only works in non-grid mode
+5. **Boolean Operations**: Convert shapes to polygons, perform geometric operations, create new polygon shapes
 
-6. **Boolean Operations**: Convert shapes to polygons, perform geometric operations, create new polygon shapes
+6. **Draw Tool**: Freehand drawing collects points during mouse drag, then auto-simplifies using Douglas-Peucker algorithm with tolerance 0.5. Creates line shapes with simplified points.
 
-7. **Animation Frame Storage**: Frames store deep copies of shape arrays using `JSON.parse(JSON.stringify())`. Each frame is an object with shapes array, name, and hold value.
+7. **Circle Rendering**: Uses dual-direction sweeping (both horizontal and vertical) with Set tracking to avoid gaps in outlines and prevent duplicate pixel/cell drawing.
 
-8. **Frame Hold System**: `frameHoldCounter` increments each animation tick. When counter reaches frame's hold value, advance to next frame and reset counter. This allows frames to display for multiple ticks.
+8. **Animation Frame Storage**: Frames store deep copies of shape arrays using `JSON.parse(JSON.stringify())`. Each frame is an object with shapes array, name, and hold value.
 
-9. **Onion Skinning**: Renders previous/next frames with temporary color palette modifications. Red tint for past frames, green tint for future frames. Opacity fades based on frame distance.
+9. **Frame Hold System**: `frameHoldCounter` increments each animation tick. When counter reaches frame's hold value, advance to next frame and reset counter. This allows frames to display for multiple ticks.
 
-10. **GIF Export**: Uses locally-hosted worker script (`gif.worker.js`) for fast encoding with web workers. No CORS issues since worker is served from same origin. UI stays responsive during encoding.
+10. **Onion Skinning**: Renders previous/next frames with temporary color palette modifications. Red tint for past frames, green tint for future frames, blue tint for wrapped frames (when wrapping to beginning/end). Uses modulo math to wrap frame indices for seamless looping. Opacity fades based on frame distance.
 
-11. **Canvas Dimension Alignment**: Canvas dimensions are rounded to be exact multiples of grid cells in `updateCanvasDimensions()`. This ensures pixel-perfect downsampling where each grid cell is a whole number of pixels.
+11. **GIF Export**: Uses locally-hosted worker script (`gif.worker.js`) for fast encoding with web workers. No CORS issues since worker is served from same origin. UI stays responsive during encoding.
+
+12. **Canvas Dimension Alignment**: Canvas dimensions are rounded to be exact multiples of grid cells in `updateCanvasDimensions()`. This ensures pixel-perfect downsampling where each grid cell is a whole number of pixels.
+
+13. **Custom Palettes**: Palettes are stored with unique IDs (e.g., `custom_timestamp`). Save system includes custom palettes in project JSON. Standalone palette save/load allows palette sharing. Filename prompts for project saves.
 
 ## Known Limitations
 
-- Fill tool doesn't work in grid mode
-- SVG export was removed (only PNG/JPG/GIF)
+- SVG export was removed (only PNG/JPG/GIF/spritesheet export)
 - Dither patterns export as rasterized in images (can't be preserved as vector patterns)
 - Maximum 50 history steps
 - Grid mode forces shapes to align to grid boundaries
 - Canvas dimensions must be multiples of grid size for pixel-perfect export
+- Line selection may be less precise than other shapes (uses 15px tolerance)
 
 ## Future Considerations
 
-- Implement fill tool for grid mode
 - Add more dither patterns
 - Layer system separate from shape ordering
-- Custom brush patterns
+- Custom brush patterns for draw tool
 - Gradient support
 - Text tool
 - Animation timeline scrubbing
 - Frame duration in seconds/milliseconds display
+- Palette organization/folders for many custom palettes
+- Export palette as image swatch
+- Adjustable draw tool simplification tolerance in UI
 
 ## Development Tips
 
@@ -340,10 +356,11 @@ Onion skinning render:
 
 ### Working with Dither
 - Patterns are 8×8 pixels stored as ImageData
-- `ditherScale` multiplies pattern size (1-16x)
+- `ditherScale` multiplies pattern size (1-32x, auto-adjusts based on grid)
 - Pattern position is calculated using modulo: `x % (8 * ditherScale)`
 - Each drawing function must check for and apply dither pattern
 - `invertDither` parameter flips the pattern logic in `applyDitherPattern()`
+- Auto-adjustment function `updateDitherScaleForGrid()` called when grid changes
 
 ### Working with Animation
 - Always use `saveCurrentFrame()` when modifying shapes
@@ -352,6 +369,18 @@ Onion skinning render:
 - Drag-and-drop uses HTML5 Drag API with `draggable` attribute
 - Hold values multiply frame duration: `delay = (1000 / fps) × hold`
 - Onion skin tinting is done by temporarily modifying color palette during render
+- Onion skin wraps using modulo: `((index % frames.length) + frames.length) % frames.length`
+- Wrapped frames use blue tint instead of red/green to indicate loop wrapping
+
+### Working with Custom Palettes
+- Custom palettes stored in `this.palettes` object with unique IDs
+- Palette names stored in `this.paletteNames` object
+- Custom palette editor uses HTML color inputs with × removal buttons
+- `customPaletteColors` array holds working copy during editing
+- Save function includes custom palettes in project JSON
+- Standalone palette files contain `{ palette: [...], name: 'name' }`
+- Palette dropdown dynamically populated with custom palette options
+- Retro system palettes are built-in and cannot be edited
 
 ### Debugging
 - Console logs can be added to export functions
@@ -375,7 +404,11 @@ This is a static web application:
 - GIF export uses web workers for fast, responsive encoding
 - Simply push to a repository (including `gif.worker.js`) and enable GitHub Pages
 
-## Credits
+## Credits & Branding
 
+- **Project Name**: Azirona Vexel Edit
+- **Subtitle**: Vector-based pixel art editor
+- **Footer**: "A tool from the Azirona Drift - azirona.com"
 - Azirona Drift palette attribution link included
 - Ko-fi donation link: "Buy us a Mtn Dew"
+- Help modal includes "About" section explaining vector-based concept
