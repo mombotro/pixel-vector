@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Vexel Edit</title>
+    <title>Azirona Vexel Edit</title>
     <style>
         * {
             margin: 0;
@@ -120,7 +120,7 @@
         }
 
         .left-panel {
-            width: 120px;
+            width: 150px;
             background: #0f3460;
             border-right: 2px solid #1a1a2e;
             overflow-y: auto;
@@ -443,6 +443,7 @@
             display: flex;
             flex-direction: column-reverse;
             gap: 2px;
+            padding: 8px;
         }
 
         .history-list {
@@ -462,7 +463,7 @@
             transition: all 0.15s;
             user-select: none;
             position: relative;
-            margin: 2px 0;
+            box-sizing: border-box;
         }
 
         .shape-order-item:hover {
@@ -521,13 +522,7 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            cursor: pointer;
-            padding: 2px;
-            border-radius: 2px;
-        }
-
-        .shape-order-item .shape-label:hover {
-            background: rgba(0, 217, 255, 0.1);
+            min-width: 0;
         }
 
         .shape-order-item .shape-z-index {
@@ -669,6 +664,24 @@
         .kofi-btn:hover {
             background: #00b8d4;
         }
+
+        .footer {
+            background: #0f3460;
+            padding: 10px 20px;
+            text-align: center;
+            border-top: 2px solid #1a1a2e;
+            font-size: 12px;
+            color: #94b0c2;
+        }
+
+        .footer a {
+            color: #00d9ff;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
@@ -676,12 +689,18 @@
         <!-- Settings Bar -->
         <div class="settings-bar">
             <div style="display: flex; align-items: center; gap: 15px;">
-                <h1>Vexel Edit</h1>
+                <div>
+                    <h1 style="margin-bottom: 2px;">Azirona Vexel Edit</h1>
+                    <div style="font-size: 10px; color: #94b0c2; font-style: italic;">Vector-based pixel art editor</div>
+                </div>
                 <div class="dropdown">
                     <button class="dropdown-btn">File ▾</button>
                     <div class="dropdown-content">
                         <button id="menu-save" title="Save (Ctrl+S)">Save (Ctrl+S)</button>
                         <button id="menu-load" title="Load">Load</button>
+                        <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
+                        <button id="menu-save-palette" title="Save Current Palette">Save Palette</button>
+                        <button id="menu-load-palette" title="Load Palette">Load Palette</button>
                         <div style="border-top: 1px solid #1a1a2e; margin: 4px 0;"></div>
                         <button id="menu-export-png" title="Export as PNG">Export as PNG</button>
                         <button id="menu-export-jpg" title="Export as JPG">Export as JPG</button>
@@ -768,7 +787,7 @@
                         <button id="tool-oval" class="tool-btn" title="Oval (4)">Oval (4)</button>
                         <button id="tool-triangle" class="tool-btn" title="Triangle (5)">Triangle (5)</button>
                         <button id="tool-polygon" class="tool-btn" title="Polygon (6)">Polygon (6)</button>
-                        <button id="tool-fill" class="tool-btn" title="Fill Cell (F)">Fill (F)</button>
+                        <button id="tool-draw" class="tool-btn" title="Draw (D)">Draw (D)</button>
                         <button id="tool-select" class="tool-btn" title="Select (V)">Select (V)</button>
                     </div>
                 </div>
@@ -787,6 +806,7 @@
                     <h3>Nodes</h3>
                     <div class="tool-group">
                         <button id="tool-union-nodes" title="Merge Nodes (Ctrl+Shift+M)">Merge Nodes</button>
+                        <button id="tool-simplify" title="Simplify Polygon (Ctrl+Shift+L)">Simplify</button>
                     </div>
                 </div>
 
@@ -817,8 +837,8 @@
                         <canvas id="ditherPatternPreview" width="64" height="64" style="width: 100%; height: auto; border: 1px solid #533483; image-rendering: pixelated; background: #1a1a2e;"></canvas>
                     </div>
                     <div style="margin-bottom: 8px;">
-                        <label for="dither-scale" style="display: block; margin-bottom: 4px; font-size: 12px; color: #e94560;">Scale: <span id="dither-scale-value">1</span>x</label>
-                        <input type="range" id="dither-scale" min="1" max="16" value="1" step="1" style="width: 100%;">
+                        <label for="dither-scale" style="display: block; margin-bottom: 4px; font-size: 12px; color: #e94560;">Scale: <span id="dither-scale-value">8</span>x</label>
+                        <input type="range" id="dither-scale" min="1" max="32" value="8" step="1" style="width: 100%;">
                     </div>
                     <div style="margin-bottom: 8px;">
                         <label style="display: flex; align-items: center; font-size: 12px; color: #e94560; cursor: pointer;">
@@ -908,6 +928,13 @@
                             <option value="pico8">Pico-8</option>
                             <option value="gameboy">Game Boy</option>
                             <option value="1bit">1-Bit (B&W)</option>
+                            <option value="nes">NES</option>
+                            <option value="c64">Commodore 64</option>
+                            <option value="cga">CGA</option>
+                            <option value="zxspectrum">ZX Spectrum</option>
+                            <option value="appleii">Apple II</option>
+                            <option value="amstradcpc">Amstrad CPC</option>
+                            <option value="custom">Custom...</option>
                             <option value="lospec">Import from Lospec...</option>
                         </select>
                         <div class="color-palette" id="colorPalette"></div>
@@ -935,6 +962,11 @@
                 </div>
             </div>
         </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            A tool from the Azirona Drift - <a href="https://azirona.com" target="_blank" rel="noopener">azirona.com</a>
+        </div>
     </div>
 
     <!-- Rename Modal -->
@@ -951,12 +983,42 @@
 
     <!-- Help Modal -->
     <div id="helpModal" class="modal">
-        <div class="modal-content" style="min-width: 500px;">
+        <div class="modal-content" style="min-width: 550px; max-height: 80vh; overflow-y: auto;">
+            <h3>About Azirona Vexel Edit</h3>
+            <div style="font-size: 11px; line-height: 1.6; margin-bottom: 15px; padding: 10px; background: #1a1a2e; border-left: 3px solid #00d9ff;">
+                <strong style="color: #00d9ff;">Vector-Based Pixel Art Editor</strong><br>
+                This tool combines the precision of vector graphics with the aesthetic of pixel art. Unlike traditional pixel editors that work with raster images, Vexel Edit uses vector shapes that snap to a pixel grid. This means you can easily edit, move, and manipulate your artwork without losing quality, while still achieving that perfect pixel-art look.
+            </div>
+            <h3>Tool Usage</h3>
+            <div style="font-size: 11px; line-height: 1.6; margin-bottom: 20px;">
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Line Tool:</strong> Left-click to add points. Right-click to finish (near start point to close as polygon).
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Rectangle/Circle/Oval:</strong> Left-click to set first point, move mouse, left-click to set second point.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Triangle:</strong> Left-click three times to place corners.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Polygon:</strong> Left-click to add points. Right-click to finish (near start to close).
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Draw Tool:</strong> Click and drag to draw freehand. Auto-simplifies on release.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Select Tool:</strong> Left-click shapes to select. Drag shapes to move. Drag nodes to edit. Right-click on edges to add nodes, on nodes to remove.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong style="color: #00d9ff;">Rotation Mode (R):</strong> Click and drag the rotation handle to rotate selected shapes.
+                </div>
+            </div>
             <h3>Keyboard Shortcuts</h3>
             <div style="columns: 2; font-size: 11px; line-height: 1.8;">
                 <div><kbd>1-6</kbd> Select drawing tools</div>
+                <div><kbd>D</kbd> Freehand draw tool</div>
                 <div><kbd>V</kbd> Select tool (move/edit)</div>
-                <div><kbd>F</kbd> Fill cell tool</div>
+                <div><kbd>R</kbd> Toggle rotation mode</div>
                 <div><kbd>Right-click</kbd> Add/remove nodes</div>
                 <div><kbd>Ctrl+C</kbd> Copy selected shapes</div>
                 <div><kbd>Ctrl+V</kbd> Paste shapes</div>
@@ -967,6 +1029,7 @@
                 <div><kbd>Ctrl+Shift+B</kbd> Subtract</div>
                 <div><kbd>Ctrl+Shift+I</kbd> Intersect</div>
                 <div><kbd>Ctrl+Shift+P</kbd> To Polygon</div>
+                <div><kbd>Ctrl+Shift+L</kbd> Simplify</div>
                 <div><kbd>Ctrl+Z</kbd> Undo</div>
                 <div><kbd>Ctrl+S</kbd> Save to file</div>
                 <div><kbd>H</kbd> Lock horizontal</div>
@@ -999,10 +1062,48 @@
                     <input type="checkbox" id="exportTransparent" style="margin-right: 8px;">
                     <span>Transparent background</span>
                 </label>
+                <div id="exportGridOptions" style="display: none; margin-top: 15px;">
+                    <label style="display: block; margin-bottom: 10px;">
+                        <span style="display: block; margin-bottom: 5px; color: #e94560;">Grid Layout:</span>
+                        <div style="display: flex; gap: 10px;">
+                            <div style="flex: 1;">
+                                <span style="display: block; margin-bottom: 5px; font-size: 12px; color: #888;">Columns:</span>
+                                <input type="number" id="exportCols" min="1" max="20" value="1" style="width: 100%; padding: 8px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px;">
+                            </div>
+                            <div style="flex: 1;">
+                                <span style="display: block; margin-bottom: 5px; font-size: 12px; color: #888;">Rows:</span>
+                                <input type="number" id="exportRows" min="1" max="20" value="1" style="width: 100%; padding: 8px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px;">
+                            </div>
+                        </div>
+                        <span style="display: block; margin-top: 5px; font-size: 12px; color: #888;" id="exportGridInfo"></span>
+                    </label>
+                </div>
             </div>
             <div class="modal-buttons">
                 <button id="exportConfirm" style="background: #e94560;">Export</button>
                 <button id="exportCancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom Palette Modal -->
+    <div id="customPaletteModal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>Custom Palette</h3>
+            <div style="margin: 15px 0;">
+                <p style="font-size: 11px; color: #94b0c2; margin-bottom: 10px;">Click on any color to edit it. Click the × to remove a color. Use + to add colors.</p>
+                <div id="customPaletteGrid" style="display: grid; grid-template-columns: repeat(8, 40px); gap: 5px; margin-bottom: 15px;"></div>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button id="addPaletteColor" style="flex: 1;">+ Add Color</button>
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #e94560;">Palette Name:</label>
+                    <input type="text" id="customPaletteName" placeholder="My Custom Palette" style="width: 100%; padding: 6px; background: #1a1a2e; color: #fff; border: 1px solid #533483; border-radius: 3px;">
+                </div>
+            </div>
+            <div class="modal-buttons">
+                <button id="saveCustomPalette">Save Palette</button>
+                <button id="cancelCustomPalette">Cancel</button>
             </div>
         </div>
     </div>

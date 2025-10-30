@@ -37,12 +37,56 @@ class VectorEditor {
             ],
             '1bit': [
                 '#000000', '#ffffff'
+            ],
+            'nes': [
+                '#7C7C7C', '#0000FC', '#0000BC', '#4428BC',
+                '#940084', '#A80020', '#A81000', '#881400',
+                '#503000', '#007800', '#006800', '#005800',
+                '#004058', '#000000', '#000000', '#000000',
+                '#BCBCBC', '#0078F8', '#0058F8', '#6844FC',
+                '#D800CC', '#E40058', '#F83800', '#E45C10',
+                '#AC7C00', '#00B800', '#00A800', '#00A844',
+                '#008888', '#000000', '#000000', '#000000'
+            ],
+            'c64': [
+                '#000000', '#FFFFFF', '#880000', '#AAFFEE',
+                '#CC44CC', '#00CC55', '#0000AA', '#EEEE77',
+                '#DD8855', '#664400', '#FF7777', '#333333',
+                '#777777', '#AAFF66', '#0088FF', '#BBBBBB'
+            ],
+            'cga': [
+                '#000000', '#0000AA', '#00AA00', '#00AAAA',
+                '#AA0000', '#AA00AA', '#AA5500', '#AAAAAA',
+                '#555555', '#5555FF', '#55FF55', '#55FFFF',
+                '#FF5555', '#FF55FF', '#FFFF55', '#FFFFFF'
+            ],
+            'zxspectrum': [
+                '#000000', '#0000D7', '#D70000', '#D700D7',
+                '#00D700', '#00D7D7', '#D7D700', '#D7D7D7',
+                '#000000', '#0000FF', '#FF0000', '#FF00FF',
+                '#00FF00', '#00FFFF', '#FFFF00', '#FFFFFF'
+            ],
+            'appleii': [
+                '#000000', '#D03030', '#0000D0', '#D030D0',
+                '#009000', '#808080', '#3030FF', '#D0B0FF',
+                '#905000', '#FF9050', '#C0C0C0', '#FFB0D0',
+                '#30D030', '#D0D090', '#90FFB0', '#FFFFFF'
+            ],
+            'amstradcpc': [
+                '#000000', '#000080', '#0000FF', '#800000',
+                '#800080', '#8000FF', '#FF0000', '#FF0080',
+                '#FF00FF', '#008000', '#008080', '#0080FF',
+                '#808000', '#808080', '#8080FF', '#FF8000',
+                '#FF8080', '#FF80FF', '#00FF00', '#00FF80',
+                '#00FFFF', '#80FF00', '#80FF80', '#80FFFF',
+                '#FFFF00', '#FFFF80', '#FFFFFF'
             ]
         };
 
         this.currentPalette = '16bit';
         this.colors = [...this.palettes['16bit']];
         this.paletteNames = {}; // Store custom palette names
+        this.customPaletteColors = []; // Temporary array for custom palette editor
 
         // State
         this.currentColor = 0;
@@ -57,11 +101,16 @@ class VectorEditor {
         this.copiedShape = null;
         this.copiedShapes = []; // Multiple copied shapes
         this.isDragging = false;
-        this.dragMode = null; // 'point', 'shape', or 'selection-box'
+        this.dragMode = null; // 'point', 'shape', 'selection-box', or 'rotate'
         this.lockDirection = null; // 'horizontal', 'vertical', or null
         this.selectionBox = null; // {x1, y1, x2, y2} for drag selection
         this.draggedShapeIndex = null; // Track shape being dragged in order preview
         this.isEditingShapeName = false; // Track if currently editing a shape name
+        this.isFreehandDrawing = false; // Track if actively drawing freehand
+        this.rotationMode = false; // Track if in rotation mode (R key pressed)
+        this.rotationCenter = null; // Center point for rotation
+        this.rotationStartAngle = 0; // Starting angle for rotation
+        this.initialShapePoints = []; // Backup of points before rotation starts
 
         // Cache for preview updates - avoid rebuilding on every render
         this.lastShapeCount = 0;
@@ -102,7 +151,7 @@ class VectorEditor {
         this.ditherPatterns = [];
         this.selectedDitherPattern = 0;
         this.ditherPatternSize = 8; // Each pattern is 8x8 pixels in the atlas
-        this.ditherScale = 1; // Scale multiplier for dither patterns
+        this.ditherScale = 8; // Scale multiplier for dither patterns (default 8x for 32px grid)
         this.invertDither = false; // Invert dither pattern
 
         // Animation settings
@@ -921,6 +970,132 @@ class VectorEditor {
         }
     }
 
+    showCustomPaletteEditor() {
+        this.customPaletteColors = [...this.colors]; // Start with current palette
+        this.updateCustomPaletteGrid();
+        document.getElementById('customPaletteName').value = this.paletteNames[this.currentPalette] || 'My Custom Palette';
+        document.getElementById('customPaletteModal').style.display = 'flex';
+    }
+
+    updateCustomPaletteGrid() {
+        const grid = document.getElementById('customPaletteGrid');
+        if (!grid) return;
+
+        grid.innerHTML = '';
+
+        this.customPaletteColors.forEach((color, index) => {
+            const colorBtn = document.createElement('div');
+            colorBtn.style.cssText = `
+                width: 40px;
+                height: 40px;
+                background-color: ${color};
+                border: 2px solid #533483;
+                border-radius: 4px;
+                cursor: pointer;
+                position: relative;
+            `;
+
+            // Add color picker input
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.value = color;
+            colorInput.style.cssText = `
+                position: absolute;
+                width: 100%;
+                height: 100%;
+                opacity: 0;
+                cursor: pointer;
+            `;
+
+            colorInput.addEventListener('input', (e) => {
+                this.customPaletteColors[index] = e.target.value;
+                colorBtn.style.backgroundColor = e.target.value;
+            });
+
+            // Add X button to remove color
+            const removeBtn = document.createElement('div');
+            removeBtn.textContent = '×';
+            removeBtn.style.cssText = `
+                position: absolute;
+                top: -6px;
+                right: -6px;
+                width: 16px;
+                height: 16px;
+                background: #e94560;
+                color: #fff;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                font-weight: bold;
+                cursor: pointer;
+                line-height: 1;
+                z-index: 10;
+            `;
+
+            removeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (this.customPaletteColors.length <= 1) {
+                    alert('Must have at least 1 color');
+                    return;
+                }
+                this.customPaletteColors.splice(index, 1);
+                this.updateCustomPaletteGrid();
+            });
+
+            colorBtn.appendChild(colorInput);
+            colorBtn.appendChild(removeBtn);
+            grid.appendChild(colorBtn);
+        });
+    }
+
+    addColorToCustomPalette() {
+        if (this.customPaletteColors.length >= 64) {
+            alert('Maximum 64 colors per palette');
+            return;
+        }
+        this.customPaletteColors.push('#000000');
+        this.updateCustomPaletteGrid();
+    }
+
+    saveCustomPalette() {
+        const name = document.getElementById('customPaletteName').value.trim() || 'Custom Palette';
+        const paletteId = `custom_${Date.now()}`;
+
+        // Save palette
+        this.palettes[paletteId] = [...this.customPaletteColors];
+        this.paletteNames[paletteId] = name;
+        this.currentPalette = paletteId;
+        this.colors = [...this.customPaletteColors];
+
+        // Add to dropdown if not exists
+        const select = document.getElementById('palette-select');
+        let option = select.querySelector(`option[value="${paletteId}"]`);
+        if (!option) {
+            option = document.createElement('option');
+            option.value = paletteId;
+            option.textContent = name;
+            // Insert before "Custom..." option
+            const customOption = select.querySelector('option[value="custom"]');
+            select.insertBefore(option, customOption);
+        }
+        select.value = paletteId;
+
+        // Reset color selection if needed
+        if (this.currentColor >= this.colors.length) {
+            this.currentColor = 0;
+        }
+
+        this.setupColorPalette();
+        this.render();
+
+        // Close modal
+        document.getElementById('customPaletteModal').style.display = 'none';
+
+        alert(`Custom palette "${name}" saved with ${this.customPaletteColors.length} colors!`);
+    }
+
     setupEventListeners() {
         // Canvas events
         this.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
@@ -975,11 +1150,15 @@ class VectorEditor {
         // Union nodes button
         document.getElementById('tool-union-nodes').addEventListener('click', () => this.unionNodes());
 
+        // Simplify button
+        document.getElementById('tool-simplify').addEventListener('click', () => this.simplifySelectedShapes());
+
         // Grid dropdown (if exists)
         const gridSize = document.getElementById('grid-size');
         if (gridSize) {
             gridSize.addEventListener('change', (e) => {
                 this.gridCells = parseInt(e.target.value);
+                this.updateDitherScaleForGrid();
                 this.render();
             });
         }
@@ -1020,11 +1199,28 @@ class VectorEditor {
                     this.importLospecPalette();
                     // Reset dropdown to current palette
                     e.target.value = this.currentPalette;
+                } else if (paletteId === 'custom') {
+                    this.showCustomPaletteEditor();
+                    // Reset dropdown to current palette
+                    e.target.value = this.currentPalette;
                 } else {
                     this.setPalette(paletteId);
                 }
             });
         }
+
+        // Custom palette modal handlers
+        document.getElementById('cancelCustomPalette')?.addEventListener('click', () => {
+            document.getElementById('customPaletteModal').style.display = 'none';
+        });
+
+        document.getElementById('saveCustomPalette')?.addEventListener('click', () => {
+            this.saveCustomPalette();
+        });
+
+        document.getElementById('addPaletteColor')?.addEventListener('click', () => {
+            this.addColorToCustomPalette();
+        });
 
         // Background color picker (if exists)
         const bgColor = document.getElementById('bg-color');
@@ -1237,7 +1433,7 @@ class VectorEditor {
             'oval': 'Oval',
             'triangle': 'Triangle',
             'polygon': 'Polygon',
-            'fill': 'Fill Cell',
+            'draw': 'Freehand Draw',
             'select': 'Select'
         };
         const info = document.getElementById('toolInfo');
@@ -1246,16 +1442,45 @@ class VectorEditor {
 
     getToolHint() {
         switch (this.currentTool) {
-            case 'line': return 'Click two points';
+            case 'line': return 'Click to add points, right-click to finish (near start to close)';
             case 'rect': return 'Click two corners';
             case 'circle': return 'Click center, then radius point';
             case 'oval': return 'Click two corners to define bounds';
             case 'triangle': return 'Click three points';
             case 'polygon': return 'Click points, right-click to finish';
-            case 'fill': return 'Click to fill a single cell';
+            case 'draw': return 'Click and drag to draw freehand';
             case 'select': return 'Click and drag shapes or nodes';
             default: return 'Click to place points';
         }
+    }
+
+    updateDitherScaleForGrid() {
+        // Auto-adjust dither scale based on grid size
+        // 8px grid → 32x, 16px → 16x, 32px → 8x, 64px → 4x
+        let newScale = 1;
+        switch (this.gridCells) {
+            case 8:
+                newScale = 32;
+                break;
+            case 16:
+                newScale = 16;
+                break;
+            case 32:
+                newScale = 8;
+                break;
+            case 64:
+                newScale = 4;
+                break;
+            default:
+                // Grid off or other size - keep current scale
+                return;
+        }
+
+        this.ditherScale = newScale;
+        const scaleInput = document.getElementById('dither-scale');
+        const scaleValue = document.getElementById('dither-scale-value');
+        if (scaleInput) scaleInput.value = newScale;
+        if (scaleValue) scaleValue.textContent = newScale;
     }
 
     getCellSize() {
@@ -1303,6 +1528,21 @@ class VectorEditor {
     handleMouseMove(e) {
         const pos = this.getMousePos(e);
 
+        // Freehand drawing - collect points while mouse is down
+        if (this.isFreehandDrawing && this.mouseDown) {
+            const lastPoint = this.currentPoints[this.currentPoints.length - 1];
+            // Only add point if it's different from the last one (avoid duplicates)
+            if (pos.x !== lastPoint.x || pos.y !== lastPoint.y) {
+                this.currentPoints.push({ ...pos });
+                this.render();
+            }
+            this.mouseX = pos.x;
+            this.mouseY = pos.y;
+            this.lastMouseX = pos.x;
+            this.lastMouseY = pos.y;
+            return;
+        }
+
         // Apply direction lock
         if (this.lockDirection === 'horizontal' && this.currentPoints.length > 0) {
             pos.y = this.currentPoints[this.currentPoints.length - 1].y;
@@ -1332,6 +1572,18 @@ class VectorEditor {
                     });
                 });
                 this.shapeWasModified = true;
+            } else if (this.dragMode === 'rotate') {
+                // Calculate rotation angle
+                const currentAngle = Math.atan2(pos.y - this.rotationCenter.y, pos.x - this.rotationCenter.x);
+                const deltaAngle = currentAngle - this.rotationStartAngle;
+
+                // Apply rotation to all selected shapes
+                this.initialShapePoints.forEach(({ shape, points }) => {
+                    shape.points = points.map(p =>
+                        this.rotatePoint(p, this.rotationCenter, deltaAngle)
+                    );
+                });
+                this.shapeWasModified = true;
             } else if (this.dragMode === 'selection-box' && this.selectionBox) {
                 // Update selection box
                 this.selectionBox.x2 = pos.x;
@@ -1348,6 +1600,33 @@ class VectorEditor {
     }
 
     handleMouseUp(e) {
+        // Finish freehand drawing
+        if (this.isFreehandDrawing && this.currentPoints.length > 1) {
+            // Simplify the path to reduce node count
+            const simplified = this.simplifyPolygon(this.currentPoints, 0.5);
+
+            if (simplified.length > 1) {
+                // Create a line shape with the simplified points
+                const shape = {
+                    type: 'line',
+                    color: this.currentColor,
+                    lineWidth: this.lineWidth,
+                    outline: false,
+                    points: simplified
+                };
+                this.shapes.push(shape);
+                this.selectedShape = shape;
+                this.selectedShapes = [shape];
+                this.saveHistory();
+                this.saveCurrentFrame();
+                this.updateShapeOrderPreview();
+            }
+
+            this.isFreehandDrawing = false;
+            this.currentPoints = [];
+            this.render();
+        }
+
         // If we were dragging a selection box, select all shapes within it
         if (this.dragMode === 'selection-box' && this.selectionBox) {
             const box = this.selectionBox;
@@ -1368,8 +1647,8 @@ class VectorEditor {
             this.render();
         }
 
-        // Save history only if shapes were actually modified (moved, resized, etc.)
-        if (this.shapeWasModified && this.isDragging && (this.dragMode === 'point' || this.dragMode === 'shape')) {
+        // Save history only if shapes were actually modified (moved, resized, rotated, etc.)
+        if (this.shapeWasModified && this.isDragging && (this.dragMode === 'point' || this.dragMode === 'shape' || this.dragMode === 'rotate')) {
             this.saveHistory();
             this.updateShapeOrderPreview();
         }
@@ -1382,8 +1661,33 @@ class VectorEditor {
 
     handleLeftClick(pos, shiftKey = false) {
         if (this.currentTool === 'select') {
-            // Try to select a node first (higher priority) - only if single shape selected
-            if (this.selectedShapes.length <= 1 && this.trySelectNode(pos, shiftKey)) {
+            // Check if in rotation mode and clicking on rotation handle
+            if (this.rotationMode && this.selectedShapes.length > 0) {
+                const bounds = this.getShapesBounds(this.selectedShapes);
+                const centerX = (bounds.minX + bounds.maxX) / 2;
+                const centerY = (bounds.minY + bounds.maxY) / 2;
+                const handleY = bounds.minY - 30;
+
+                // Check if clicking on rotation handle
+                const distToHandle = Math.sqrt((pos.x - centerX) ** 2 + (pos.y - handleY) ** 2);
+                if (distToHandle < 10) {
+                    // Start rotation
+                    this.isDragging = true;
+                    this.dragMode = 'rotate';
+                    this.rotationCenter = { x: centerX, y: centerY };
+                    this.rotationStartAngle = Math.atan2(pos.y - centerY, pos.x - centerX);
+
+                    // Save initial points for all selected shapes
+                    this.initialShapePoints = this.selectedShapes.map(shape => ({
+                        shape: shape,
+                        points: shape.points.map(p => ({...p}))
+                    }));
+                    return;
+                }
+            }
+
+            // Try to select a node first (higher priority) - only if single shape selected and not in rotation mode
+            if (!this.rotationMode && this.selectedShapes.length <= 1 && this.trySelectNode(pos, shiftKey)) {
                 return;
             }
 
@@ -1404,15 +1708,19 @@ class VectorEditor {
                 } else {
                     // Check if clicked shape is already in selection
                     if (this.selectedShapes.includes(clickedShape)) {
-                        // Start dragging all selected shapes
-                        this.isDragging = true;
-                        this.dragMode = 'shape';
+                        // Start dragging all selected shapes (if not in rotation mode)
+                        if (!this.rotationMode) {
+                            this.isDragging = true;
+                            this.dragMode = 'shape';
+                        }
                     } else {
                         // Single select - replace selection
                         this.selectedShapes = [clickedShape];
                         this.selectedShape = clickedShape;
-                        this.isDragging = true;
-                        this.dragMode = 'shape';
+                        if (!this.rotationMode) {
+                            this.isDragging = true;
+                            this.dragMode = 'shape';
+                        }
                         this.render();
                     }
                 }
@@ -1425,8 +1733,16 @@ class VectorEditor {
                 this.selectedShape = null;
                 this.selectedPoint = null;
                 this.selectedPoints = [];
+                this.rotationMode = false; // Exit rotation mode when clearing selection
                 this.render();
             }
+            return;
+        }
+
+        // Freehand draw tool - start collecting points
+        if (this.currentTool === 'draw') {
+            this.isFreehandDrawing = true;
+            this.currentPoints = [{ ...pos }];
             return;
         }
 
@@ -1434,6 +1750,37 @@ class VectorEditor {
     }
 
     handleRightClick(pos) {
+        // Check if drawing a line - right-click finishes it
+        if (this.currentTool === 'line' && this.currentPoints.length >= 1) {
+            const firstPoint = this.currentPoints[0];
+            const dist = Math.sqrt((pos.x - firstPoint.x) ** 2 + (pos.y - firstPoint.y) ** 2);
+
+            // If clicking near the first node AND we have at least 2 points, close the shape (convert to polygon)
+            if (dist < 15 && this.currentPoints.length >= 2) {
+                // Convert to closed polygon
+                const shape = {
+                    type: 'polygon',
+                    color: this.currentColor,
+                    lineWidth: this.lineWidth,
+                    outline: this.outline,
+                    points: [...this.currentPoints],
+                    ditherPattern: this.ditherPattern,
+                    invertDither: this.invertDither
+                };
+                this.shapes.push(shape);
+                this.selectedShape = shape;
+                this.currentPoints = [];
+                this.saveHistory();
+                this.updateShapeOrderPreview();
+                this.render();
+            } else {
+                // End the line at this point (open polyline)
+                this.currentPoints.push({...pos});
+                this.finishShape();
+            }
+            return;
+        }
+
         // Check if drawing a polygon - right-click finishes it
         if (this.currentTool === 'polygon' && this.currentPoints.length >= 3) {
             const firstPoint = this.currentPoints[0];
@@ -1579,29 +1926,11 @@ class VectorEditor {
     }
 
     addPoint(pos) {
-        // Fill tool - single click fills a cell immediately
-        if (this.currentTool === 'fill') {
-            const shape = {
-                type: 'fill',
-                color: this.currentColor,
-                lineWidth: 1,
-                outline: false,
-                points: [{...pos}]
-            };
-            this.shapes.push(shape);
-            this.selectedShape = shape;
-            this.render();
-            return;
-        }
-
         this.currentPoints.push({...pos});
 
         // Auto-finish shapes based on point count
         let shouldFinish = false;
         switch (this.currentTool) {
-            case 'line':
-                shouldFinish = this.currentPoints.length === 2;
-                break;
             case 'rect':
             case 'circle':
             case 'oval':
@@ -1610,6 +1939,7 @@ class VectorEditor {
             case 'triangle':
                 shouldFinish = this.currentPoints.length === 3;
                 break;
+            // line and polygon don't auto-finish - require right-click
         }
 
         if (shouldFinish) {
@@ -1703,29 +2033,11 @@ class VectorEditor {
                 return this.isPointInPolygon(pos, shape.points);
             case 'line':
                 return this.isPointNearLine(pos, shape.points);
-            case 'fill':
-                return this.isPointInFillCell(pos, shape.points);
             default:
                 return false;
         }
     }
 
-    isPointInFillCell(pos, points) {
-        const cellSize = this.getCellSize();
-        const point = points[0];
-
-        if (cellSize > 0) {
-            // Grid mode - check if in same cell
-            const cellX = Math.floor(point.x / cellSize);
-            const cellY = Math.floor(point.y / cellSize);
-            const posX = Math.floor(pos.x / cellSize);
-            const posY = Math.floor(pos.y / cellSize);
-            return cellX === posX && cellY === posY;
-        } else {
-            // Regular mode - check 4x4 square
-            return Math.abs(pos.x - point.x) <= 2 && Math.abs(pos.y - point.y) <= 2;
-        }
-    }
 
     isPointInRect(pos, points) {
         const x1 = Math.min(points[0].x, points[1].x);
@@ -1787,8 +2099,16 @@ class VectorEditor {
     }
 
     isPointNearLine(pos, points) {
-        const dist = this.distanceToLine(pos, points[0], points[1]);
-        return dist < 10;
+        // Check distance to any segment in the polyline
+        // Increased tolerance to make lines easier to select
+        const tolerance = 15;
+        for (let i = 0; i < points.length - 1; i++) {
+            const dist = this.distanceToLine(pos, points[i], points[i + 1]);
+            if (dist < tolerance) {
+                return true;
+            }
+        }
+        return false;
     }
 
     distanceToLine(point, lineStart, lineEnd) {
@@ -2076,6 +2396,20 @@ class VectorEditor {
                 return;
             }
 
+            // For rect/circle/oval, use geometric conversion (clean, minimal nodes)
+            if (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'oval') {
+                const polygonShape = this.shapeToPolygon(shape);
+                if (polygonShape) {
+                    convertedShapes.push(polygonShape);
+                    // Remove original shape
+                    const index = this.shapes.indexOf(shape);
+                    if (index > -1) {
+                        this.shapes.splice(index, 1);
+                    }
+                }
+                return;
+            }
+
             // For other shapes, rasterize and convert to polygon
             const pixels = this.rasterizeShapesToPixels([shape]);
             const newShape = this.pixelsToPolygon(pixels, shape.color);
@@ -2150,6 +2484,36 @@ class VectorEditor {
         }
     }
 
+    simplifySelectedShapes() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one polygon to simplify');
+            return;
+        }
+
+        let simplified = false;
+        this.selectedShapes.forEach(shape => {
+            // Only simplify polygons and lines (polylines)
+            if (shape.type === 'polygon' || shape.type === 'line') {
+                const originalCount = shape.points.length;
+                shape.points = this.simplifyPolygon(shape.points, 2.0);
+                const newCount = shape.points.length;
+
+                if (newCount < originalCount) {
+                    simplified = true;
+                    console.log(`Simplified ${shape.type}: ${originalCount} → ${newCount} nodes (removed ${originalCount - newCount})`);
+                }
+            }
+        });
+
+        if (simplified) {
+            this.saveHistory();
+            this.updateShapeOrderPreview();
+            this.render();
+        } else {
+            alert('No simplification needed - shapes already have minimal nodes');
+        }
+    }
+
     lineToPolygon(lineShape) {
         const p1 = lineShape.points[0];
         const p2 = lineShape.points[1];
@@ -2190,10 +2554,17 @@ class VectorEditor {
         const pixels = new Set();
 
         shapes.forEach(shape => {
-            // For lines, convert to polygon first to preserve shape
+            // Convert shapes to clean polygons first to avoid excessive nodes
             let shapeToRasterize = shape;
+
+            // For lines, convert to polygon first to preserve shape
             if (shape.type === 'line' && shape.points.length === 2) {
                 shapeToRasterize = this.lineToPolygon(shape);
+                if (!shapeToRasterize) return;
+            }
+            // For rect/circle/oval, convert to clean geometric polygons
+            else if (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'oval') {
+                shapeToRasterize = this.shapeToPolygon(shape);
                 if (!shapeToRasterize) return;
             }
 
@@ -2201,13 +2572,16 @@ class VectorEditor {
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.canvasWidth;
             tempCanvas.height = this.canvasHeight;
-            const tempCtx = tempCanvas.getContext('2d');
+            const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
             // Save current context and swap
             const origCtx = this.ctx;
             const origScale = this.scale;
+            const origGridCells = this.gridCells;
+
             this.ctx = tempCtx;
             this.scale = 1;
+            this.gridCells = 0; // IMPORTANT: Disable grid during rasterization for smooth results
 
             // Force shape to be filled (not outline) for boolean operations
             const originalOutline = shapeToRasterize.outline;
@@ -2216,8 +2590,9 @@ class VectorEditor {
             // Draw the shape
             this.drawShape(shapeToRasterize, false);
 
-            // Restore outline property
+            // Restore outline property and settings
             shapeToRasterize.outline = originalOutline;
+            this.gridCells = origGridCells;
 
             // Get pixel data
             const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
@@ -2237,6 +2612,55 @@ class VectorEditor {
         });
 
         return pixels;
+    }
+
+    simplifyPolygon(points, tolerance = 2.0) {
+        if (points.length < 3) return points;
+
+        // First pass: remove duplicate and very close points
+        const deduplicated = [];
+        const minDistance = 1.5; // Minimum distance between points
+
+        for (let i = 0; i < points.length; i++) {
+            const curr = points[i];
+            const next = points[(i + 1) % points.length];
+
+            // Calculate distance to next point
+            const dx = next.x - curr.x;
+            const dy = next.y - curr.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            // Only keep if distance to next point is above threshold
+            if (dist >= minDistance) {
+                deduplicated.push(curr);
+            }
+        }
+
+        if (deduplicated.length < 3) return points;
+
+        // Second pass: remove collinear points (points that lie on the same line)
+        const simplified = [];
+
+        for (let i = 0; i < deduplicated.length; i++) {
+            const prev = deduplicated[(i - 1 + deduplicated.length) % deduplicated.length];
+            const curr = deduplicated[i];
+            const next = deduplicated[(i + 1) % deduplicated.length];
+
+            // Calculate cross product to check if points are collinear
+            const dx1 = curr.x - prev.x;
+            const dy1 = curr.y - prev.y;
+            const dx2 = next.x - curr.x;
+            const dy2 = next.y - curr.y;
+
+            const cross = Math.abs(dx1 * dy2 - dy1 * dx2);
+
+            // Keep point if it creates a significant angle (not collinear)
+            if (cross > tolerance) {
+                simplified.push(curr);
+            }
+        }
+
+        return simplified.length >= 3 ? simplified : deduplicated;
     }
 
     pixelsToPolygon(pixels, color) {
@@ -2269,9 +2693,13 @@ class VectorEditor {
 
         if (outlinePoints.length < 3) return null;
 
+        // Simplify the polygon to remove unnecessary collinear points
+        // Use more aggressive simplification for boolean operations
+        const simplifiedPoints = this.simplifyPolygon(outlinePoints, 3.0);
+
         return {
             type: 'polygon',
-            points: outlinePoints,
+            points: simplifiedPoints,
             color: color,
             lineWidth: 1,
             outline: false
@@ -2678,17 +3106,44 @@ class VectorEditor {
     }
 
     save() {
+        // Save current frame before saving file
+        this.saveCurrentFrame();
+
+        // Ask for filename
+        const filename = prompt('Enter filename:', 'vector-art');
+        if (!filename) return; // User cancelled
+
+        // Get custom palettes only (exclude built-in ones)
+        const customPalettes = {};
+        const customPaletteNames = {};
+        Object.keys(this.palettes).forEach(key => {
+            if (key.startsWith('custom_') || key.startsWith('lospec_')) {
+                customPalettes[key] = this.palettes[key];
+                if (this.paletteNames[key]) {
+                    customPaletteNames[key] = this.paletteNames[key];
+                }
+            }
+        });
+
         const data = {
             canvasWidth: this.canvasWidth,
             canvasHeight: this.canvasHeight,
             backgroundColor: this.backgroundColor,
-            shapes: this.shapes
+            shapes: this.shapes,
+            frames: this.frames,
+            currentPalette: this.currentPalette,
+            colors: this.colors,
+            customPalettes: customPalettes,
+            customPaletteNames: customPaletteNames,
+            gridCells: this.gridCells,
+            fps: this.fps
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'vector-art.json';
+        // Add .json extension if not present
+        a.download = filename.endsWith('.json') ? filename : `${filename}.json`;
         a.click();
         URL.revokeObjectURL(url);
     }
@@ -2710,7 +3165,7 @@ class VectorEditor {
                             // Old format - just shapes
                             this.shapes = data;
                         } else {
-                            // New format - includes canvas dimensions
+                            // New format - includes canvas dimensions and more
                             this.shapes = data.shapes || [];
                             if (data.canvasWidth && data.canvasHeight) {
                                 this.canvasWidth = data.canvasWidth;
@@ -2722,14 +3177,139 @@ class VectorEditor {
                                 this.backgroundColor = data.backgroundColor;
                                 document.getElementById('bg-color').value = this.backgroundColor;
                             }
+
+                            // Restore custom palettes
+                            if (data.customPalettes) {
+                                Object.assign(this.palettes, data.customPalettes);
+                            }
+                            if (data.customPaletteNames) {
+                                Object.assign(this.paletteNames, data.customPaletteNames);
+                            }
+
+                            // Restore current palette and colors
+                            if (data.currentPalette && this.palettes[data.currentPalette]) {
+                                this.currentPalette = data.currentPalette;
+                                this.colors = data.colors || [...this.palettes[data.currentPalette]];
+
+                                // Update palette dropdown
+                                const select = document.getElementById('palette-select');
+                                if (select) {
+                                    // Add custom palettes to dropdown if they don't exist
+                                    Object.keys(data.customPalettes || {}).forEach(paletteId => {
+                                        let option = select.querySelector(`option[value="${paletteId}"]`);
+                                        if (!option) {
+                                            option = document.createElement('option');
+                                            option.value = paletteId;
+                                            option.textContent = this.paletteNames[paletteId] || paletteId;
+                                            const customOption = select.querySelector('option[value="custom"]');
+                                            select.insertBefore(option, customOption);
+                                        }
+                                    });
+                                    select.value = this.currentPalette;
+                                }
+                            }
+
+                            // Restore frames
+                            if (data.frames && data.frames.length > 0) {
+                                this.frames = data.frames;
+                                this.currentFrame = 0;
+                                this.loadFrame(0);
+                                this.updateFrameThumbnails();
+                            }
+
+                            // Restore other settings
+                            if (data.gridCells !== undefined) {
+                                this.gridCells = data.gridCells;
+                            }
+                            if (data.fps !== undefined) {
+                                this.fps = data.fps;
+                                const fpsSlider = document.getElementById('anim-fps');
+                                const fpsValue = document.getElementById('fps-value');
+                                if (fpsSlider) fpsSlider.value = this.fps;
+                                if (fpsValue) fpsValue.textContent = this.fps;
+                            }
                         }
 
                         this.currentPoints = [];
                         this.selectedShape = null;
                         this.selectedPoint = null;
+                        this.selectedShapes = [];
+                        this.setupColorPalette();
+                        this.saveHistory();
                         this.render();
                     } catch (err) {
                         alert('Error loading file: ' + err.message);
+                    }
+                };
+                reader.readAsText(file);
+            }
+        };
+        input.click();
+    }
+
+    savePalette() {
+        const data = {
+            palette: this.colors,
+            name: this.paletteNames[this.currentPalette] || this.currentPalette
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `palette-${data.name.replace(/[^a-z0-9]/gi, '-').toLowerCase()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    loadPalette() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const data = JSON.parse(event.target.result);
+
+                        if (!data.palette || !Array.isArray(data.palette)) {
+                            alert('Invalid palette file');
+                            return;
+                        }
+
+                        const paletteName = data.name || 'Imported Palette';
+                        const paletteId = `custom_${Date.now()}`;
+
+                        // Add palette
+                        this.palettes[paletteId] = data.palette;
+                        this.paletteNames[paletteId] = paletteName;
+                        this.currentPalette = paletteId;
+                        this.colors = [...data.palette];
+
+                        // Add to dropdown
+                        const select = document.getElementById('palette-select');
+                        let option = select.querySelector(`option[value="${paletteId}"]`);
+                        if (!option) {
+                            option = document.createElement('option');
+                            option.value = paletteId;
+                            option.textContent = paletteName;
+                            const customOption = select.querySelector('option[value="custom"]');
+                            select.insertBefore(option, customOption);
+                        }
+                        select.value = paletteId;
+
+                        // Reset color selection if needed
+                        if (this.currentColor >= this.colors.length) {
+                            this.currentColor = 0;
+                        }
+
+                        this.setupColorPalette();
+                        this.render();
+
+                        alert(`Palette "${paletteName}" loaded with ${data.palette.length} colors!`);
+                    } catch (err) {
+                        alert('Error loading palette: ' + err.message);
                     }
                 };
                 reader.readAsText(file);
@@ -2869,7 +3449,7 @@ class VectorEditor {
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = this.canvas.width;
         tempCanvas.height = this.canvas.height;
-        const tempCtx = tempCanvas.getContext('2d');
+        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
 
         const savedCtx = this.ctx;
         const savedCanvas = this.canvas;
@@ -2950,7 +3530,7 @@ class VectorEditor {
         }, 'image/jpeg', 0.95);
     }
 
-    showSpritesheetDialog() {
+    showGIFDialog() {
         if (this.frames.length === 0) {
             alert('No frames to export!');
             return;
@@ -2961,28 +3541,30 @@ class VectorEditor {
         const scaleInput = document.getElementById('exportScale');
         const sizeSpan = document.getElementById('exportSize');
         const transparentOption = document.getElementById('exportTransparencyOption');
+        const transparentCheckbox = document.getElementById('exportTransparent');
+        const gridOptions = document.getElementById('exportGridOptions');
         const confirmBtn = document.getElementById('exportConfirm');
         const cancelBtn = document.getElementById('exportCancel');
 
         // Set title
-        titleEl.textContent = 'Export Spritesheet';
-        transparentOption.style.display = 'none';
+        titleEl.textContent = 'Export GIF';
+        transparentOption.style.display = 'block';
+        gridOptions.style.display = 'none';
 
-        // Calculate spritesheet dimensions
+        // Calculate dimensions
         const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
         const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-        const cols = Math.ceil(Math.sqrt(this.frames.length));
-        const rows = Math.ceil(this.frames.length / cols);
 
         // Update size display
         const updateSize = () => {
             const scale = parseInt(scaleInput.value) || 1;
-            const totalWidth = actualWidth * cols * scale;
-            const totalHeight = actualHeight * rows * scale;
-            sizeSpan.textContent = `${totalWidth} × ${totalHeight} (${this.frames.length} frames, ${cols}×${rows} grid)`;
+            const totalWidth = actualWidth * scale;
+            const totalHeight = actualHeight * scale;
+            sizeSpan.textContent = `${totalWidth} × ${totalHeight} (${this.frames.length} frames)`;
         };
 
         scaleInput.value = 1;
+        transparentCheckbox.checked = false;
         updateSize();
 
         scaleInput.oninput = updateSize;
@@ -2993,8 +3575,9 @@ class VectorEditor {
         // Handle confirm
         const handleConfirm = () => {
             const scale = parseInt(scaleInput.value) || 1;
+            const transparent = transparentCheckbox.checked;
             modal.style.display = 'none';
-            this.exportSpritesheet(scale);
+            this.exportGIF(scale, transparent);
             cleanup();
         };
 
@@ -3014,7 +3597,105 @@ class VectorEditor {
         cancelBtn.addEventListener('click', handleCancel);
     }
 
-    exportSpritesheet(exportScale = 1) {
+    showSpritesheetDialog() {
+        if (this.frames.length === 0) {
+            alert('No frames to export!');
+            return;
+        }
+
+        const modal = document.getElementById('exportModal');
+        const titleEl = document.getElementById('exportModalTitle');
+        const scaleInput = document.getElementById('exportScale');
+        const sizeSpan = document.getElementById('exportSize');
+        const transparentOption = document.getElementById('exportTransparencyOption');
+        const transparentCheckbox = document.getElementById('exportTransparent');
+        const gridOptions = document.getElementById('exportGridOptions');
+        const colsInput = document.getElementById('exportCols');
+        const rowsInput = document.getElementById('exportRows');
+        const gridInfo = document.getElementById('exportGridInfo');
+        const confirmBtn = document.getElementById('exportConfirm');
+        const cancelBtn = document.getElementById('exportCancel');
+
+        // Set title
+        titleEl.textContent = 'Export Spritesheet';
+        transparentOption.style.display = 'block';
+        gridOptions.style.display = 'block';
+
+        // Calculate spritesheet dimensions
+        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
+        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+        const defaultCols = Math.ceil(Math.sqrt(this.frames.length));
+        const defaultRows = Math.ceil(this.frames.length / defaultCols);
+
+        // Update size display
+        const updateSize = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            const cols = parseInt(colsInput.value) || defaultCols;
+            const rows = parseInt(rowsInput.value) || defaultRows;
+            const totalWidth = actualWidth * cols * scale;
+            const totalHeight = actualHeight * rows * scale;
+            const totalCells = cols * rows;
+            sizeSpan.textContent = `${totalWidth} × ${totalHeight} pixels`;
+
+            if (totalCells < this.frames.length) {
+                gridInfo.textContent = `⚠️ Grid too small! Need ${this.frames.length} cells, have ${totalCells}`;
+                gridInfo.style.color = '#e94560';
+            } else {
+                gridInfo.textContent = `${this.frames.length} frames in ${cols}×${rows} grid (${totalCells - this.frames.length} empty cells)`;
+                gridInfo.style.color = '#888';
+            }
+        };
+
+        scaleInput.value = 1;
+        colsInput.value = defaultCols;
+        rowsInput.value = defaultRows;
+        transparentCheckbox.checked = false;
+        updateSize();
+
+        scaleInput.oninput = updateSize;
+        colsInput.oninput = updateSize;
+        rowsInput.oninput = updateSize;
+
+        // Show modal
+        modal.style.display = 'flex';
+
+        // Handle confirm
+        const handleConfirm = () => {
+            const scale = parseInt(scaleInput.value) || 1;
+            const cols = parseInt(colsInput.value) || defaultCols;
+            const rows = parseInt(rowsInput.value) || defaultRows;
+            const transparent = transparentCheckbox.checked;
+
+            // Validate grid size
+            if (cols * rows < this.frames.length) {
+                alert(`Grid too small! Need at least ${this.frames.length} cells for ${this.frames.length} frames.`);
+                return;
+            }
+
+            modal.style.display = 'none';
+            this.exportSpritesheet(scale, transparent, cols, rows);
+            cleanup();
+        };
+
+        // Handle cancel
+        const handleCancel = () => {
+            modal.style.display = 'none';
+            cleanup();
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            scaleInput.oninput = null;
+            colsInput.oninput = null;
+            rowsInput.oninput = null;
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    }
+
+    exportSpritesheet(exportScale = 1, transparent = false, cols = null, rows = null) {
         if (this.frames.length === 0) {
             alert('No frames to export!');
             return;
@@ -3024,9 +3705,9 @@ class VectorEditor {
         const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
         const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
 
-        // Calculate spritesheet dimensions (horizontal layout)
-        const cols = Math.ceil(Math.sqrt(this.frames.length));
-        const rows = Math.ceil(this.frames.length / cols);
+        // Calculate spritesheet dimensions
+        if (!cols) cols = Math.ceil(Math.sqrt(this.frames.length));
+        if (!rows) rows = Math.ceil(this.frames.length / cols);
         const spritesheetWidth = actualWidth * cols * exportScale;
         const spritesheetHeight = actualHeight * rows * exportScale;
 
@@ -3042,8 +3723,13 @@ class VectorEditor {
         spritesheetCtx.webkitImageSmoothingEnabled = false;
         spritesheetCtx.msImageSmoothingEnabled = false;
 
-        // Fill with transparent background
-        spritesheetCtx.clearRect(0, 0, spritesheetWidth, spritesheetHeight);
+        // Fill with transparent or background color
+        if (transparent) {
+            spritesheetCtx.clearRect(0, 0, spritesheetWidth, spritesheetHeight);
+        } else {
+            spritesheetCtx.fillStyle = this.backgroundColor;
+            spritesheetCtx.fillRect(0, 0, spritesheetWidth, spritesheetHeight);
+        }
 
         // Render each frame to the spritesheet
         const savedShapes = this.shapes;
@@ -3061,11 +3747,13 @@ class VectorEditor {
             const frameCanvas = document.createElement('canvas');
             frameCanvas.width = this.canvas.width;
             frameCanvas.height = this.canvas.height;
-            const frameCtx = frameCanvas.getContext('2d');
+            const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
 
-            // Render frame with background
-            frameCtx.fillStyle = this.backgroundColor;
-            frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+            // Render frame with background or transparent
+            if (!transparent) {
+                frameCtx.fillStyle = this.backgroundColor;
+                frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+            }
 
             // Temporarily switch context to render this frame
             this.ctx = frameCtx;
@@ -3142,7 +3830,7 @@ class VectorEditor {
         }, 'image/png');
     }
 
-    exportGIF() {
+    exportGIF(exportScale = 1, transparent = false) {
         if (this.frames.length === 0) {
             alert('No frames to export!');
             return;
@@ -3155,33 +3843,31 @@ class VectorEditor {
         }
 
         console.log('Starting GIF export...');
-        console.log(`Frames: ${this.frames.length}, FPS: ${this.fps}`);
+        console.log(`Frames: ${this.frames.length}, FPS: ${this.fps}, Scale: ${exportScale}, Transparent: ${transparent}`);
 
         // Calculate pixel-perfect size
         const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
         const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
+        const finalWidth = actualWidth * exportScale;
+        const finalHeight = actualHeight * exportScale;
 
-        console.log(`GIF dimensions: ${actualWidth}x${actualHeight}`);
+        console.log(`GIF dimensions: ${finalWidth}x${finalHeight}`);
 
         // Create GIF encoder
-        // Auto-detect if we're running from file:// or http(s)://
-        const isLocalFile = window.location.protocol === 'file:';
+        // Use local worker script (no CORS issues, faster than main thread)
         const gifConfig = {
             quality: 10,
-            width: actualWidth,
-            height: actualHeight
+            width: finalWidth,
+            height: finalHeight,
+            workers: 2,
+            workerScript: './gif.worker.js'  // Local file, no CORS issues
         };
 
-        if (isLocalFile) {
-            // Running locally - disable workers to avoid CORS
-            gifConfig.workers = 0;
-            console.log('Running from local file - using main thread for GIF encoding');
-        } else {
-            // Running on a server (GitHub Pages, etc.) - use workers for better performance
-            gifConfig.workers = 2;
-            gifConfig.workerScript = 'https://cdn.jsdelivr.net/npm/gif.js@0.2.0/dist/gif.worker.js';
-            console.log('Running on server - using web workers for GIF encoding');
+        if (transparent) {
+            gifConfig.transparent = 0x000000;  // Set black as transparent color
         }
+
+        console.log('Using web workers for GIF encoding');
 
         try {
             const gif = new GIF(gifConfig);
@@ -3210,11 +3896,18 @@ class VectorEditor {
                 const frameCanvas = document.createElement('canvas');
                 frameCanvas.width = this.canvas.width;
                 frameCanvas.height = this.canvas.height;
-                const frameCtx = frameCanvas.getContext('2d');
+                const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
 
-                // Render frame with background
-                frameCtx.fillStyle = this.backgroundColor;
-                frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+                // Render frame with background or transparent
+                if (transparent) {
+                    // Clear to transparent, then fill with black (which will be set as transparent in GIF)
+                    frameCtx.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
+                    frameCtx.fillStyle = '#000000';
+                    frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+                } else {
+                    frameCtx.fillStyle = this.backgroundColor;
+                    frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
+                }
 
                 // Temporarily switch context to render this frame
                 this.ctx = frameCtx;
@@ -3252,10 +3945,27 @@ class VectorEditor {
 
                 framePixelCtx.putImageData(dstData, 0, 0);
 
+                // Scale up if needed
+                let finalFrameCanvas = framePixelCanvas;
+                if (exportScale > 1) {
+                    const scaledCanvas = document.createElement('canvas');
+                    scaledCanvas.width = finalWidth;
+                    scaledCanvas.height = finalHeight;
+                    const scaledCtx = scaledCanvas.getContext('2d');
+
+                    scaledCtx.imageSmoothingEnabled = false;
+                    scaledCtx.mozImageSmoothingEnabled = false;
+                    scaledCtx.webkitImageSmoothingEnabled = false;
+                    scaledCtx.msImageSmoothingEnabled = false;
+
+                    scaledCtx.drawImage(framePixelCanvas, 0, 0, finalWidth, finalHeight);
+                    finalFrameCanvas = scaledCanvas;
+                }
+
                 // Add frame to GIF with delay based on hold value
                 const frameDelay = baseDelay * (frame.hold || 1);
                 console.log(`Adding frame ${index + 1} with delay ${frameDelay}ms (hold: ${frame.hold})`);
-                gif.addFrame(framePixelCanvas, { delay: frameDelay });
+                gif.addFrame(finalFrameCanvas, { delay: frameDelay, copy: true });
             });
 
             // Restore original state
@@ -3266,11 +3976,6 @@ class VectorEditor {
 
             // Show progress message
             console.log('All frames added. Starting GIF encoding...');
-
-            // Alert user that encoding is happening (only when running locally without workers)
-            if (isLocalFile) {
-                alert('GIF encoding started. This may take a moment (running in main thread)...');
-            }
 
             // Render and download the GIF
             gif.on('finished', (blob) => {
@@ -3284,21 +3989,13 @@ class VectorEditor {
                 console.log('GIF download started!');
             });
 
-            // Add progress handler for server mode
-            if (!isLocalFile) {
-                gif.on('progress', (progress) => {
-                    console.log(`GIF encoding progress: ${Math.round(progress * 100)}%`);
-                });
-            }
+            // Add progress handler
+            gif.on('progress', (progress) => {
+                console.log(`GIF encoding progress: ${Math.round(progress * 100)}%`);
+            });
 
-            // Use setTimeout to allow the alert to show before blocking (local mode only)
-            if (isLocalFile) {
-                setTimeout(() => {
-                    gif.render();
-                }, 100);
-            } else {
-                gif.render();
-            }
+            // Start rendering
+            gif.render();
 
         } catch (error) {
             console.error('Error creating/encoding GIF:', error);
@@ -3348,8 +4045,52 @@ class VectorEditor {
             this.selectTool('select');
             e.preventDefault();
         }
-        if (e.key === 'f' || e.key === 'F') {
-            this.selectTool('fill');
+        if (e.key === 'd' || e.key === 'D') {
+            this.selectTool('draw');
+            e.preventDefault();
+        }
+        if (e.key === 'r' || e.key === 'R') {
+            // Toggle rotation mode when select tool is active and shapes are selected
+            if (this.currentTool === 'select' && this.selectedShapes.length > 0) {
+                if (!this.rotationMode) {
+                    // Entering rotation mode - convert rect/oval/circle to polygons first
+                    const shapesToConvert = this.selectedShapes.filter(shape =>
+                        shape.type === 'rect' || shape.type === 'oval' || shape.type === 'circle'
+                    );
+
+                    if (shapesToConvert.length > 0) {
+                        // Convert these shapes to polygons
+                        shapesToConvert.forEach(shape => {
+                            const polygonShape = this.shapeToPolygon(shape);
+                            if (polygonShape) {
+                                // Replace the shape in the shapes array
+                                const index = this.shapes.indexOf(shape);
+                                if (index !== -1) {
+                                    this.shapes[index] = polygonShape;
+                                }
+                                // Update in selected shapes
+                                const selectedIndex = this.selectedShapes.indexOf(shape);
+                                if (selectedIndex !== -1) {
+                                    this.selectedShapes[selectedIndex] = polygonShape;
+                                }
+                                if (this.selectedShape === shape) {
+                                    this.selectedShape = polygonShape;
+                                }
+                            }
+                        });
+                        this.saveHistory();
+                        this.updateShapeOrderPreview();
+                    }
+                }
+
+                this.rotationMode = !this.rotationMode;
+                if (!this.rotationMode) {
+                    // Exiting rotation mode - clear rotation state
+                    this.rotationCenter = null;
+                    this.initialShapePoints = [];
+                }
+                this.render();
+            }
             e.preventDefault();
         }
 
@@ -3443,6 +4184,10 @@ class VectorEditor {
             this.unionNodes();
             e.preventDefault();
         }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'L' || e.key === 'l')) {
+            this.simplifySelectedShapes();
+            e.preventDefault();
+        }
 
         // Actions
         if (e.key === 'Escape') {
@@ -3452,6 +4197,9 @@ class VectorEditor {
             this.selectedPoint = null;
             this.selectedPoints = [];
             this.lockDirection = null;
+            this.rotationMode = false;
+            this.rotationCenter = null;
+            this.initialShapePoints = [];
             this.render();
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -3463,10 +4211,16 @@ class VectorEditor {
     drawOnionSkin() {
         const baseOpacity = this.onionSkinOpacity / 100;
 
-        // Draw previous frames (red/orange tint)
+        // Draw previous frames (red tint, blue if wrapped)
         for (let i = 1; i <= this.onionSkinFrames; i++) {
-            const frameIndex = this.currentFrame - i;
-            if (frameIndex < 0) break;
+            const rawIndex = this.currentFrame - i;
+            const didWrap = rawIndex < 0;
+
+            // Wrap around to end if going before frame 0
+            let frameIndex = ((rawIndex % this.frames.length) + this.frames.length) % this.frames.length;
+
+            // Skip if we've wrapped back to the current frame
+            if (frameIndex === this.currentFrame) continue;
 
             const frame = this.frames[frameIndex];
             const opacity = baseOpacity * (1 - (i - 1) / this.onionSkinFrames);
@@ -3474,18 +4228,25 @@ class VectorEditor {
             this.ctx.save();
             this.ctx.globalAlpha = opacity;
 
-            // Draw each shape in the frame with a red tint
+            // Draw each shape in the frame with a red or blue tint
             frame.shapes.forEach(shape => {
-                // Create a modified version of the shape with red tint
                 const tintedShape = { ...shape };
-                // Save original color
                 const originalColor = this.colors[shape.color];
 
-                // Create red-tinted version
-                const r = Math.min(255, parseInt(originalColor.slice(1, 3), 16) + 80);
-                const g = Math.max(0, parseInt(originalColor.slice(3, 5), 16) - 30);
-                const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
-                const tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                let tintedColor;
+                if (didWrap) {
+                    // Blue tint for wrapped frames
+                    const r = Math.max(0, parseInt(originalColor.slice(1, 3), 16) - 30);
+                    const g = Math.max(0, parseInt(originalColor.slice(3, 5), 16) - 30);
+                    const b = Math.min(255, parseInt(originalColor.slice(5, 7), 16) + 80);
+                    tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                } else {
+                    // Red tint for normal previous frames
+                    const r = Math.min(255, parseInt(originalColor.slice(1, 3), 16) + 80);
+                    const g = Math.max(0, parseInt(originalColor.slice(3, 5), 16) - 30);
+                    const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
+                    tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                }
 
                 // Temporarily modify the color palette
                 const savedColor = this.colors[shape.color];
@@ -3500,10 +4261,16 @@ class VectorEditor {
             this.ctx.restore();
         }
 
-        // Draw next frames (green/blue tint)
+        // Draw next frames (green tint, blue if wrapped)
         for (let i = 1; i <= this.onionSkinFrames; i++) {
-            const frameIndex = this.currentFrame + i;
-            if (frameIndex >= this.frames.length) break;
+            const rawIndex = this.currentFrame + i;
+            const didWrap = rawIndex >= this.frames.length;
+
+            // Wrap around to beginning if going past last frame
+            let frameIndex = rawIndex % this.frames.length;
+
+            // Skip if we've wrapped back to the current frame
+            if (frameIndex === this.currentFrame) continue;
 
             const frame = this.frames[frameIndex];
             const opacity = baseOpacity * (1 - (i - 1) / this.onionSkinFrames);
@@ -3511,18 +4278,25 @@ class VectorEditor {
             this.ctx.save();
             this.ctx.globalAlpha = opacity;
 
-            // Draw each shape in the frame with a green tint
+            // Draw each shape in the frame with a green or blue tint
             frame.shapes.forEach(shape => {
-                // Create a modified version of the shape with green tint
                 const tintedShape = { ...shape };
-                // Save original color
                 const originalColor = this.colors[shape.color];
 
-                // Create green-tinted version
-                const r = Math.max(0, parseInt(originalColor.slice(1, 3), 16) - 30);
-                const g = Math.min(255, parseInt(originalColor.slice(3, 5), 16) + 80);
-                const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
-                const tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                let tintedColor;
+                if (didWrap) {
+                    // Blue tint for wrapped frames
+                    const r = Math.max(0, parseInt(originalColor.slice(1, 3), 16) - 30);
+                    const g = Math.max(0, parseInt(originalColor.slice(3, 5), 16) - 30);
+                    const b = Math.min(255, parseInt(originalColor.slice(5, 7), 16) + 80);
+                    tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                } else {
+                    // Green tint for normal next frames
+                    const r = Math.max(0, parseInt(originalColor.slice(1, 3), 16) - 30);
+                    const g = Math.min(255, parseInt(originalColor.slice(3, 5), 16) + 80);
+                    const b = Math.max(0, parseInt(originalColor.slice(5, 7), 16) - 30);
+                    tintedColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                }
 
                 // Temporarily modify the color palette
                 const savedColor = this.colors[shape.color];
@@ -3569,14 +4343,16 @@ class VectorEditor {
             this.drawSelectionBox();
         }
 
-        // Draw points for selected shape (only if single shape selected)
-        if (this.showSelectionNodes && this.selectedShape && this.selectedShapes.length === 1 && this.currentTool === 'select') {
+        // Draw points for selected shape (only if single shape selected and not in rotation mode)
+        if (this.showSelectionNodes && this.selectedShape && this.selectedShapes.length === 1 && this.currentTool === 'select' && !this.rotationMode) {
             this.drawPoints(this.selectedShape);
         }
 
-        // Draw bounding box for multiple selected shapes
-        if (this.showSelectionNodes && this.selectedShapes.length > 1 && this.currentTool === 'select') {
-            this.drawMultiSelectionBox();
+        // Draw bounding box/rotation handle for selected shapes (single or multiple)
+        if (this.showSelectionNodes && this.selectedShapes.length >= 1 && this.currentTool === 'select') {
+            if (this.rotationMode || this.selectedShapes.length > 1) {
+                this.drawMultiSelectionBox();
+            }
         }
 
         // Update previews only if something changed
@@ -3658,7 +4434,15 @@ class VectorEditor {
 
         switch (shape.type) {
             case 'line':
-                this.drawLine(shape.points, color, lineWidth, ditherPattern, invertDither);
+                // Draw all line segments for polylines
+                if (shape.points.length === 2) {
+                    this.drawLine(shape.points, color, lineWidth, ditherPattern, invertDither);
+                } else {
+                    // Multi-segment polyline
+                    for (let i = 0; i < shape.points.length - 1; i++) {
+                        this.drawLine([shape.points[i], shape.points[i + 1]], color, lineWidth, ditherPattern, invertDither);
+                    }
+                }
                 break;
             case 'rect':
                 this.drawRect(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
@@ -3675,57 +4459,12 @@ class VectorEditor {
             case 'polygon':
                 this.drawPolygon(shape.points, color, lineWidth, outline, ditherPattern, invertDither);
                 break;
-            case 'fill':
-                this.drawFill(shape.points[0], color, ditherPattern, invertDither);
-                break;
         }
 
         this.ctx = prevCtx;
         this.scale = prevScale;
     }
 
-    drawFill(point, color, ditherPattern = undefined, invertDither = false) {
-        const cellSize = this.getCellSize();
-
-        if (cellSize > 0) {
-            // Grid mode - fill the grid cell
-            const cx = Math.floor(point.x / cellSize);
-            const cy = Math.floor(point.y / cellSize);
-            const pixelX = cx * cellSize;
-            const pixelY = cy * cellSize;
-            const cellPixelSize = cellSize;
-
-            if (ditherPattern !== undefined && ditherPattern !== null) {
-                // Apply dither pattern pixel by pixel
-                for (let py = 0; py < cellPixelSize; py++) {
-                    for (let px = 0; px < cellPixelSize; px++) {
-                        this.applyDitherPattern(pixelX + px, pixelY + py, color, ditherPattern, invertDither);
-                    }
-                }
-            } else {
-                // Apply scale for rendering (scale = 1 during rasterization, > 1 during normal render)
-                this.ctx.fillStyle = color;
-                this.ctx.fillRect(pixelX * this.scale, pixelY * this.scale,
-                                 cellPixelSize * this.scale, cellPixelSize * this.scale);
-            }
-        } else {
-            // Regular mode - fill a small square
-            const size = 4;
-            const halfSize = 2;
-            if (ditherPattern !== undefined && ditherPattern !== null) {
-                for (let py = -halfSize; py < halfSize; py++) {
-                    for (let px = -halfSize; px < halfSize; px++) {
-                        this.applyDitherPattern(point.x + px, point.y + py, color, ditherPattern, invertDither);
-                    }
-                }
-            } else {
-                this.ctx.fillStyle = color;
-                this.ctx.fillRect((point.x - halfSize) * this.scale,
-                                 (point.y - halfSize) * this.scale,
-                                 size * this.scale, size * this.scale);
-            }
-        }
-    }
 
     // Bresenham line algorithm for pixel-perfect lines with width support
     drawLine(points, color, lineWidth = 1, ditherPattern = undefined, invertDither = false) {
@@ -3900,8 +4639,10 @@ class VectorEditor {
             const cellSize = this.getCellSize();
 
             if (cellSize > 0) {
-                // Grid mode - draw edge cells
+                // Grid mode - draw edge cells, sweep in both directions
                 const filledCells = new Set();
+
+                // Sweep vertically (left and right edges)
                 for (let y = -radius; y <= radius; y++) {
                     const width = Math.floor(Math.sqrt(radius * radius - y * y));
 
@@ -3923,12 +4664,61 @@ class VectorEditor {
                         }
                     }
                 }
+
+                // Sweep horizontally (top and bottom edges) to fill gaps
+                for (let x = -radius; x <= radius; x++) {
+                    const height = Math.floor(Math.sqrt(radius * radius - x * x));
+
+                    // Draw top and bottom edges for each column
+                    for (let y = -height; y <= height; y++) {
+                        const px = cx + x;
+                        const py = cy + y;
+
+                        // Check if this is an edge pixel
+                        const isEdge = (y === -height || y === height ||
+                                       Math.abs(y) === height - 1);
+
+                        if (isEdge) {
+                            const cellKey = `${Math.floor(px / cellSize)},${Math.floor(py / cellSize)}`;
+                            if (!filledCells.has(cellKey)) {
+                                filledCells.add(cellKey);
+                                this.fillGridCell(px, py, color);
+                            }
+                        }
+                    }
+                }
             } else {
-                // Draw perimeter pixels only - just left and right edges
+                // Draw perimeter pixels - sweep in both directions to avoid gaps
+                const drawnPixels = new Set();
+
+                // Sweep horizontally (left and right edges)
                 for (let y = -radius; y <= radius; y++) {
                     const width = Math.floor(Math.sqrt(radius * radius - y * y));
-                    this.setPixel(cx - width, cy + y, color);
-                    this.setPixel(cx + width, cy + y, color);
+                    const leftKey = `${cx - width},${cy + y}`;
+                    const rightKey = `${cx + width},${cy + y}`;
+                    if (!drawnPixels.has(leftKey)) {
+                        this.setPixel(cx - width, cy + y, color);
+                        drawnPixels.add(leftKey);
+                    }
+                    if (!drawnPixels.has(rightKey)) {
+                        this.setPixel(cx + width, cy + y, color);
+                        drawnPixels.add(rightKey);
+                    }
+                }
+
+                // Sweep vertically (top and bottom edges) to fill gaps
+                for (let x = -radius; x <= radius; x++) {
+                    const height = Math.floor(Math.sqrt(radius * radius - x * x));
+                    const topKey = `${cx + x},${cy - height}`;
+                    const bottomKey = `${cx + x},${cy + height}`;
+                    if (!drawnPixels.has(topKey)) {
+                        this.setPixel(cx + x, cy - height, color);
+                        drawnPixels.add(topKey);
+                    }
+                    if (!drawnPixels.has(bottomKey)) {
+                        this.setPixel(cx + x, cy + height, color);
+                        drawnPixels.add(bottomKey);
+                    }
                 }
             }
             return;
@@ -4212,8 +5002,22 @@ class VectorEditor {
 
         switch (this.currentTool) {
             case 'line':
-                if (this.currentPoints.length === 1) {
-                    this.drawLine(points, color, this.lineWidth);
+                if (this.currentPoints.length >= 1) {
+                    // Draw the polyline so far
+                    for (let i = 0; i < this.currentPoints.length - 1; i++) {
+                        this.drawLine([this.currentPoints[i], this.currentPoints[i + 1]], color, this.lineWidth);
+                    }
+                    // Draw line from last point to current mouse position
+                    this.drawLine([this.currentPoints[this.currentPoints.length - 1], {x: this.mouseX, y: this.mouseY}], color, this.lineWidth);
+
+                    // Draw a circle at the first point to show where to close the shape
+                    if (this.currentPoints.length >= 2) {
+                        const firstPoint = this.currentPoints[0];
+                        this.ctx.fillStyle = color;
+                        this.ctx.beginPath();
+                        this.ctx.arc(firstPoint.x * this.scale, firstPoint.y * this.scale, 5, 0, Math.PI * 2);
+                        this.ctx.fill();
+                    }
                 }
                 break;
             case 'rect':
@@ -4248,12 +5052,22 @@ class VectorEditor {
                     }
                 }
                 break;
+            case 'draw':
+                if (this.currentPoints.length >= 2) {
+                    // Draw the freehand path so far
+                    for (let i = 0; i < this.currentPoints.length - 1; i++) {
+                        this.drawLine([this.currentPoints[i], this.currentPoints[i + 1]], color, this.lineWidth);
+                    }
+                }
+                break;
         }
 
-        // Draw current points
-        this.currentPoints.forEach(p => {
-            this.drawPoint(p, '#00d9ff');
-        });
+        // Draw current points (skip for draw tool to avoid clutter)
+        if (this.currentTool !== 'draw') {
+            this.currentPoints.forEach(p => {
+                this.drawPoint(p, '#00d9ff');
+            });
+        }
     }
 
     drawPoints(shape) {
@@ -4301,21 +5115,161 @@ class VectorEditor {
         this.ctx.restore();
     }
 
+    getShapesBounds(shapes) {
+        let minX = Infinity, minY = Infinity;
+        let maxX = -Infinity, maxY = -Infinity;
+
+        shapes.forEach(shape => {
+            // For circles, calculate actual bounds based on radius
+            if (shape.type === 'circle') {
+                const cx = shape.points[0].x;
+                const cy = shape.points[0].y;
+                const dx = shape.points[1].x - cx;
+                const dy = shape.points[1].y - cy;
+                const radius = Math.sqrt(dx * dx + dy * dy);
+
+                minX = Math.min(minX, cx - radius);
+                minY = Math.min(minY, cy - radius);
+                maxX = Math.max(maxX, cx + radius);
+                maxY = Math.max(maxY, cy + radius);
+            }
+            // For ovals, calculate actual bounds based on radii
+            else if (shape.type === 'oval') {
+                const x1 = Math.min(shape.points[0].x, shape.points[1].x);
+                const y1 = Math.min(shape.points[0].y, shape.points[1].y);
+                const x2 = Math.max(shape.points[0].x, shape.points[1].x);
+                const y2 = Math.max(shape.points[0].y, shape.points[1].y);
+
+                minX = Math.min(minX, x1);
+                minY = Math.min(minY, y1);
+                maxX = Math.max(maxX, x2);
+                maxY = Math.max(maxY, y2);
+            }
+            // For all other shapes, use control points
+            else {
+                shape.points.forEach(p => {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                });
+            }
+        });
+
+        return { minX, minY, maxX, maxY };
+    }
+
+    getShapesCenter(shapes) {
+        const bounds = this.getShapesBounds(shapes);
+        return {
+            x: (bounds.minX + bounds.maxX) / 2,
+            y: (bounds.minY + bounds.maxY) / 2
+        };
+    }
+
+    rotatePoint(point, center, angle) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const dx = point.x - center.x;
+        const dy = point.y - center.y;
+        return {
+            x: center.x + (dx * cos - dy * sin),
+            y: center.y + (dx * sin + dy * cos)
+        };
+    }
+
+    shapeToPolygon(shape) {
+        if (shape.type === 'polygon') return shape;
+
+        if (shape.type === 'rect') {
+            // Convert rectangle to 4-point polygon
+            const x1 = Math.min(shape.points[0].x, shape.points[1].x);
+            const y1 = Math.min(shape.points[0].y, shape.points[1].y);
+            const x2 = Math.max(shape.points[0].x, shape.points[1].x);
+            const y2 = Math.max(shape.points[0].y, shape.points[1].y);
+
+            return {
+                type: 'polygon',
+                color: shape.color,
+                lineWidth: shape.lineWidth || 1,
+                outline: shape.outline || false,
+                ditherPattern: shape.ditherPattern,
+                invertDither: shape.invertDither,
+                points: [
+                    { x: x1, y: y1 },
+                    { x: x2, y: y1 },
+                    { x: x2, y: y2 },
+                    { x: x1, y: y2 }
+                ]
+            };
+        }
+
+        if (shape.type === 'circle') {
+            // Convert circle to 16-point polygon
+            const cx = shape.points[0].x;
+            const cy = shape.points[0].y;
+            const dx = shape.points[1].x - cx;
+            const dy = shape.points[1].y - cy;
+            const radius = Math.sqrt(dx * dx + dy * dy);
+
+            const points = [];
+            const segments = 16;
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                points.push({
+                    x: Math.round(cx + Math.cos(angle) * radius),
+                    y: Math.round(cy + Math.sin(angle) * radius)
+                });
+            }
+
+            return {
+                type: 'polygon',
+                color: shape.color,
+                lineWidth: shape.lineWidth || 1,
+                outline: shape.outline || false,
+                ditherPattern: shape.ditherPattern,
+                invertDither: shape.invertDither,
+                points: points
+            };
+        }
+
+        if (shape.type === 'oval') {
+            // Convert oval to 16-point polygon
+            const cx = (shape.points[0].x + shape.points[1].x) / 2;
+            const cy = (shape.points[0].y + shape.points[1].y) / 2;
+            const rx = Math.abs(shape.points[1].x - shape.points[0].x) / 2;
+            const ry = Math.abs(shape.points[1].y - shape.points[0].y) / 2;
+
+            const points = [];
+            const segments = 16;
+            for (let i = 0; i < segments; i++) {
+                const angle = (i / segments) * Math.PI * 2;
+                points.push({
+                    x: Math.round(cx + Math.cos(angle) * rx),
+                    y: Math.round(cy + Math.sin(angle) * ry)
+                });
+            }
+
+            return {
+                type: 'polygon',
+                color: shape.color,
+                lineWidth: shape.lineWidth || 1,
+                outline: shape.outline || false,
+                ditherPattern: shape.ditherPattern,
+                invertDither: shape.invertDither,
+                points: points
+            };
+        }
+
+        return shape; // Return unchanged for other types
+    }
+
     drawMultiSelectionBox() {
         if (this.selectedShapes.length === 0) return;
 
         // Calculate bounding box of all selected shapes
-        let minX = Infinity, minY = Infinity;
-        let maxX = -Infinity, maxY = -Infinity;
-
-        this.selectedShapes.forEach(shape => {
-            shape.points.forEach(p => {
-                minX = Math.min(minX, p.x);
-                minY = Math.min(minY, p.y);
-                maxX = Math.max(maxX, p.x);
-                maxY = Math.max(maxY, p.y);
-            });
-        });
+        const bounds = this.getShapesBounds(this.selectedShapes);
+        const { minX, minY, maxX, maxY } = bounds;
 
         this.ctx.save();
         this.ctx.scale(this.scale, this.scale);
@@ -4326,6 +5280,37 @@ class VectorEditor {
         this.ctx.setLineDash([6, 3]);
         this.ctx.strokeRect(minX - 5, minY - 5, maxX - minX + 10, maxY - minY + 10);
 
+        // Draw rotation handle if in rotation mode
+        if (this.rotationMode) {
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const handleY = minY - 30;
+
+            // Draw line from top of box to rotation handle
+            this.ctx.strokeStyle = '#00d9ff';
+            this.ctx.lineWidth = 1;
+            this.ctx.setLineDash([]);
+            this.ctx.beginPath();
+            this.ctx.moveTo(centerX, minY - 5);
+            this.ctx.lineTo(centerX, handleY);
+            this.ctx.stroke();
+
+            // Draw rotation handle circle
+            this.ctx.fillStyle = '#00d9ff';
+            this.ctx.strokeStyle = '#000';
+            this.ctx.lineWidth = 1;
+            this.ctx.beginPath();
+            this.ctx.arc(centerX, handleY, 5, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.stroke();
+
+            // Draw center point
+            this.ctx.fillStyle = '#ff0000';
+            this.ctx.beginPath();
+            this.ctx.arc(centerX, centerY, 3, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+
         this.ctx.setLineDash([]);
         this.ctx.restore();
     }
@@ -4333,9 +5318,6 @@ class VectorEditor {
     updateShapeOrderPreview() {
         const listElement = document.getElementById('shapeOrderList');
         if (!listElement) return;
-
-        // Don't update if currently editing a shape name
-        if (this.isEditingShapeName) return;
 
         listElement.innerHTML = '';
 
@@ -4390,8 +5372,7 @@ class VectorEditor {
                 'circle': 'C',
                 'oval': 'O',
                 'triangle': 'T',
-                'polygon': 'P',
-                'fill': 'F'
+                'polygon': 'P'
             }[shape.type] || '?';
             icon.textContent = typeChar;
 
@@ -4401,18 +5382,39 @@ class VectorEditor {
             const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
             icon.style.color = brightness > 128 ? '#000' : '#fff';
 
-            // Create label
-            const label = document.createElement('div');
-            label.className = 'shape-label';
+            // Create editable name input
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'shape-label';
             const outlineText = shape.outline ? ' (outline)' : '';
             const defaultName = `${shape.type.charAt(0).toUpperCase() + shape.type.slice(1)}${outlineText}`;
-            label.textContent = shape.name || defaultName;
+            nameInput.value = shape.name || defaultName;
+            nameInput.placeholder = defaultName;
+            nameInput.style.cssText = `
+                color: #fff;
+                font-size: 11px;
+                font-family: "Courier New", monospace;
+                background: #16213e;
+                border: 1px solid #533483;
+                border-radius: 3px;
+                padding: 2px 4px;
+                flex: 1;
+                box-sizing: border-box;
+            `;
 
-            // Add double-click to rename
-            label.addEventListener('dblclick', (e) => {
-                e.preventDefault();
+            // Prevent item selection when clicking input
+            nameInput.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.startRenameShape(shape, label, defaultName);
+            });
+
+            // Save name on change
+            nameInput.addEventListener('change', (e) => {
+                const newName = e.target.value.trim();
+                shape.name = newName || null; // null = use default name
+                this.shapeWasModified = true;
+                this.saveHistory();
+                this.saveCurrentFrame();
+                this.render();
             });
 
             // Create z-index indicator
@@ -4422,7 +5424,7 @@ class VectorEditor {
 
             // Assemble item
             item.appendChild(icon);
-            item.appendChild(label);
+            item.appendChild(nameInput);
             item.appendChild(zIndex);
 
             // Make item draggable
@@ -4536,12 +5538,9 @@ class VectorEditor {
                 this.updateShapeOrderPreview();
             };
 
-            // Add click handler to icon and z-index (not label, to allow double-click rename)
+            // Add click handler to icon and z-index
             icon.addEventListener('click', selectShape);
             zIndex.addEventListener('click', selectShape);
-
-            // Add single click to label for selection
-            label.addEventListener('click', selectShape);
 
             listElement.appendChild(item);
         });
@@ -4857,9 +5856,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const menuItems = {
         'menu-save': () => window.editor.save(),
         'menu-load': () => window.editor.load(),
+        'menu-save-palette': () => window.editor.savePalette(),
+        'menu-load-palette': () => window.editor.loadPalette(),
         'menu-export-png': () => window.editor.showExportDialog('png'),
         'menu-export-jpg': () => window.editor.showExportDialog('jpg'),
-        'menu-export-gif': () => window.editor.exportGIF(),
+        'menu-export-gif': () => window.editor.showGIFDialog(),
         'menu-export-spritesheet': () => window.editor.showSpritesheetDialog(),
         'menu-clear': () => window.editor.clear(),
         'menu-undo': () => window.editor.undo(),
@@ -5060,30 +6061,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('canvas-grid-off')?.addEventListener('click', () => {
         window.editor.gridCells = 0;
+        window.editor.updateDitherScaleForGrid();
         window.editor.render();
         updateGridUI();
     });
 
     document.getElementById('canvas-grid-8')?.addEventListener('click', () => {
         window.editor.gridCells = 8;
+        window.editor.updateDitherScaleForGrid();
         window.editor.render();
         updateGridUI();
     });
 
     document.getElementById('canvas-grid-16')?.addEventListener('click', () => {
         window.editor.gridCells = 16;
+        window.editor.updateDitherScaleForGrid();
         window.editor.render();
         updateGridUI();
     });
 
     document.getElementById('canvas-grid-32')?.addEventListener('click', () => {
         window.editor.gridCells = 32;
+        window.editor.updateDitherScaleForGrid();
         window.editor.render();
         updateGridUI();
     });
 
     document.getElementById('canvas-grid-64')?.addEventListener('click', () => {
         window.editor.gridCells = 64;
+        window.editor.updateDitherScaleForGrid();
         window.editor.render();
         updateGridUI();
     });

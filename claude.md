@@ -65,12 +65,11 @@ Vexel Edit is a vector pixel art editor that allows users to create pixel-perfec
 **GIF Export:**
 - Exports all frames as animated GIF
 - Respects FPS setting and frame hold values
-- Auto-detects environment:
-  - **Local files (file://)**: Uses main thread encoding (no CORS issues)
-  - **Server (https://)**: Uses web workers for better performance
+- Uses web workers with locally-hosted worker script (fast, no CORS issues)
 - Frame delay calculated as: `(1000 / fps) × hold`
 - Infinite loop by default
 - Uses gif.js library from CDN
+- Progress logged to console during encoding
 
 **Spritesheet Export:**
 - Exports all frames arranged in a grid
@@ -230,11 +229,10 @@ Applies dither pattern at a pixel position:
 
 #### `exportGIF()`
 GIF animation export:
-1. Auto-detects environment (local file vs server)
-2. Configures gif.js with or without web workers
-3. Renders each frame to pixel-perfect size
-4. Adds frames to GIF with delays based on `fps` and `hold` values
-5. Encodes and downloads animated GIF
+1. Configures gif.js to use local worker script (fast, no CORS issues)
+2. Renders each frame to pixel-perfect size
+3. Adds frames to GIF with delays based on `fps` and `hold` values
+4. Encodes using web workers and downloads animated GIF
 
 #### `exportSpritesheet(exportScale)`
 Spritesheet export:
@@ -301,7 +299,7 @@ Onion skinning render:
 
 9. **Onion Skinning**: Renders previous/next frames with temporary color palette modifications. Red tint for past frames, green tint for future frames. Opacity fades based on frame distance.
 
-10. **GIF Export CORS**: Auto-detects `window.location.protocol` to determine if web workers can be used. Local files use main thread to avoid CORS errors. Server-hosted files use workers for better performance.
+10. **GIF Export**: Uses locally-hosted worker script (`gif.worker.js`) for fast encoding with web workers. No CORS issues since worker is served from same origin. UI stays responsive during encoding.
 
 11. **Canvas Dimension Alignment**: Canvas dimensions are rounded to be exact multiples of grid cells in `updateCanvasDimensions()`. This ensures pixel-perfect downsampling where each grid cell is a whole number of pixels.
 
@@ -312,7 +310,6 @@ Onion skinning render:
 - Dither patterns export as rasterized in images (can't be preserved as vector patterns)
 - Maximum 50 history steps
 - Grid mode forces shapes to align to grid boundaries
-- GIF export uses main thread when running from local files (may freeze UI briefly)
 - Canvas dimensions must be multiples of grid size for pixel-perfect export
 
 ## Future Considerations
@@ -366,18 +363,17 @@ Onion skinning render:
 
 This is a static web application:
 - No build step required
-- Simply serve `index.html` and `editor.js`
+- Simply serve `index.html`, `editor.js`, and `gif.worker.js`
 - External dependencies loaded from CDN:
   - gif.js for GIF animation export
 - Can be hosted on any static file server (GitHub Pages, Netlify, etc.)
-- Works offline once loaded (except GIF export requires CDN access)
+- Works offline once loaded (except gif.js library requires CDN access)
 - Dither patterns generated programmatically (no image files needed)
 
 ### GitHub Pages Deployment
 - Works perfectly on GitHub Pages (https://)
-- GIF export will use web workers for better performance
-- No CORS issues when served over HTTPS
-- Simply push to a repository and enable GitHub Pages
+- GIF export uses web workers for fast, responsive encoding
+- Simply push to a repository (including `gif.worker.js`) and enable GitHub Pages
 
 ## Credits
 
