@@ -1,7 +1,12 @@
-// Vector Pixel Art Editor - HTML5 Version
-// Based on TIC-80 vector editor by rigachupe
+/**
+ * Azirona Vexel Edit - Vector-based Pixel Art Editor
+ * A tool from the Azirona Drift
+ */
 
-class VectorEditor {
+import * as helpers from '../utils/helpers.js';
+import * as math from '../utils/math.js';
+
+export class VectorEditor {
     constructor() {
         // Canvas setup
         this.canvas = document.getElementById('canvas');
@@ -1839,7 +1844,7 @@ class VectorEditor {
             for (let i = 0; i < shape.points.length; i++) {
                 const p1 = shape.points[i];
                 const p2 = shape.points[(i + 1) % shape.points.length];
-                const dist = this.distanceToLine(pos, p1, p2);
+                const dist = math.distanceToLine(pos, p1, p2);
 
                 if (dist < minDist) {
                     minDist = dist;
@@ -2103,42 +2108,12 @@ class VectorEditor {
         // Increased tolerance to make lines easier to select
         const tolerance = 15;
         for (let i = 0; i < points.length - 1; i++) {
-            const dist = this.distanceToLine(pos, points[i], points[i + 1]);
+            const dist = math.distanceToLine(pos, points[i], points[i + 1]);
             if (dist < tolerance) {
                 return true;
             }
         }
         return false;
-    }
-
-    distanceToLine(point, lineStart, lineEnd) {
-        const A = point.x - lineStart.x;
-        const B = point.y - lineStart.y;
-        const C = lineEnd.x - lineStart.x;
-        const D = lineEnd.y - lineStart.y;
-
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        let param = -1;
-
-        if (lenSq !== 0) param = dot / lenSq;
-
-        let xx, yy;
-
-        if (param < 0) {
-            xx = lineStart.x;
-            yy = lineStart.y;
-        } else if (param > 1) {
-            xx = lineEnd.x;
-            yy = lineEnd.y;
-        } else {
-            xx = lineStart.x + param * C;
-            yy = lineStart.y + param * D;
-        }
-
-        const dx = point.x - xx;
-        const dy = point.y - yy;
-        return Math.sqrt(dx * dx + dy * dy);
     }
 
     copyShape() {
@@ -2396,8 +2371,8 @@ class VectorEditor {
                 return;
             }
 
-            // For rect/circle/oval, use geometric conversion (clean, minimal nodes)
-            if (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'oval') {
+            // For rect/circle/oval/triangle, use geometric conversion (clean, minimal nodes)
+            if (shape.type === 'rect' || shape.type === 'circle' || shape.type === 'oval' || shape.type === 'triangle') {
                 const polygonShape = this.shapeToPolygon(shape);
                 if (polygonShape) {
                     convertedShapes.push(polygonShape);
@@ -2978,7 +2953,7 @@ class VectorEditor {
         if (unique.length < 3) return unique;
 
         // Ramer-Douglas-Peucker algorithm for aggressive simplification
-        const simplified = this.douglasPeucker(unique, tolerance);
+        const simplified = math.douglasPeucker(unique, tolerance);
 
         // Further simplify by removing points that are nearly collinear
         // For polygons (closed shapes), also check the wrap-around case
@@ -3003,50 +2978,6 @@ class VectorEditor {
         }
 
         return final.length >= 3 ? final : simplified;
-    }
-
-    douglasPeucker(points, tolerance) {
-        if (points.length < 3) return points;
-
-        // Find the point with maximum distance from the line between first and last
-        let maxDist = 0;
-        let maxIndex = 0;
-        const first = points[0];
-        const last = points[points.length - 1];
-
-        for (let i = 1; i < points.length - 1; i++) {
-            const dist = this.perpendicularDistance(points[i], first, last);
-            if (dist > maxDist) {
-                maxDist = dist;
-                maxIndex = i;
-            }
-        }
-
-        // If max distance is greater than tolerance, recursively simplify
-        if (maxDist > tolerance) {
-            const left = this.douglasPeucker(points.slice(0, maxIndex + 1), tolerance);
-            const right = this.douglasPeucker(points.slice(maxIndex), tolerance);
-            return left.slice(0, -1).concat(right);
-        } else {
-            return [first, last];
-        }
-    }
-
-    perpendicularDistance(point, lineStart, lineEnd) {
-        const dx = lineEnd.x - lineStart.x;
-        const dy = lineEnd.y - lineStart.y;
-
-        if (dx === 0 && dy === 0) {
-            return Math.sqrt((point.x - lineStart.x) ** 2 + (point.y - lineStart.y) ** 2);
-        }
-
-        const t = ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (dx * dx + dy * dy);
-        const clampedT = Math.max(0, Math.min(1, t));
-
-        const projX = lineStart.x + clampedT * dx;
-        const projY = lineStart.y + clampedT * dy;
-
-        return Math.sqrt((point.x - projX) ** 2 + (point.y - projY) ** 2);
     }
 
     undo() {
@@ -5265,6 +5196,19 @@ class VectorEditor {
             };
         }
 
+        if (shape.type === 'triangle') {
+            // Convert triangle to polygon (already has 3 points)
+            return {
+                type: 'polygon',
+                color: shape.color,
+                lineWidth: shape.lineWidth || 1,
+                outline: shape.outline || false,
+                ditherPattern: shape.ditherPattern,
+                invertDither: shape.invertDither,
+                points: shape.points.slice() // Copy the 3 points
+            };
+        }
+
         return shape; // Return unchanged for other types
     }
 
@@ -5382,7 +5326,7 @@ class VectorEditor {
 
             // Determine text color for icon (black or white based on background)
             const bgColor = this.colors[shape.color] || '#ffffff';
-            const rgb = this.hexToRgb(bgColor);
+            const rgb = helpers.hexToRgb(bgColor);
             const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
             icon.style.color = brightness > 128 ? '#000' : '#fff';
 
@@ -5651,15 +5595,6 @@ class VectorEditor {
         modal.addEventListener('click', backdropHandler);
     }
 
-    hexToRgb(hex) {
-        const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-        return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-        } : { r: 0, g: 0, b: 0 };
-    }
-
     updateHistoryPreview() {
         const listElement = document.getElementById('historyList');
         if (!listElement) return;
@@ -5780,346 +5715,5 @@ class VectorEditor {
     }
 }
 
-// Initialize everything when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize the editor
-    window.editor = new VectorEditor();
-
-    // Tab switching functionality
-    const tabs = document.querySelectorAll('.tab');
-    console.log('Found tabs:', tabs.length);
-    tabs.forEach(tab => {
-        tab.addEventListener('click', (e) => {
-            console.log('Tab clicked:', tab.dataset.tab);
-            const tabName = tab.dataset.tab;
-
-            // Remove active from all tabs and tab contents
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
-
-            // Add active to clicked tab and corresponding content
-            tab.classList.add('active');
-            const targetContent = document.getElementById(`tab-${tabName}`);
-            console.log('Target content:', targetContent);
-            if (targetContent) {
-                targetContent.classList.add('active');
-            }
-        });
-    });
-
-    // Help modal functionality
-    const helpBtn = document.getElementById('helpBtn');
-    const helpModal = document.getElementById('helpModal');
-    const helpClose = document.getElementById('helpClose');
-
-    if (helpBtn) {
-        helpBtn.addEventListener('click', () => {
-            helpModal.classList.add('show');
-        });
-    }
-
-    if (helpClose) {
-        helpClose.addEventListener('click', () => {
-            helpModal.classList.remove('show');
-        });
-    }
-
-    if (helpModal) {
-        helpModal.addEventListener('click', (e) => {
-            if (e.target === helpModal) {
-                helpModal.classList.remove('show');
-            }
-        });
-    }
-
-    // Dropdown menu functionality
-    const dropdowns = document.querySelectorAll('.dropdown');
-    console.log('Found dropdowns:', dropdowns.length);
-    dropdowns.forEach(dropdown => {
-        const btn = dropdown.querySelector('.dropdown-btn');
-        if (btn) {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                console.log('Dropdown clicked');
-                // Close other dropdowns
-                dropdowns.forEach(d => {
-                    if (d !== dropdown) d.classList.remove('open');
-                });
-                // Toggle this dropdown
-                dropdown.classList.toggle('open');
-            });
-        }
-    });
-
-    // Close dropdowns when clicking outside
-    document.addEventListener('click', () => {
-        dropdowns.forEach(d => d.classList.remove('open'));
-    });
-
-    // Wire up menu buttons to existing functions
-    const menuItems = {
-        'menu-save': () => window.editor.save(),
-        'menu-load': () => window.editor.load(),
-        'menu-save-palette': () => window.editor.savePalette(),
-        'menu-load-palette': () => window.editor.loadPalette(),
-        'menu-export-png': () => window.editor.showExportDialog('png'),
-        'menu-export-jpg': () => window.editor.showExportDialog('jpg'),
-        'menu-export-gif': () => window.editor.showGIFDialog(),
-        'menu-export-spritesheet': () => window.editor.showSpritesheetDialog(),
-        'menu-clear': () => window.editor.clear(),
-        'menu-undo': () => window.editor.undo(),
-        'menu-redo': () => window.editor.redo(),
-        'menu-copy': () => window.editor.copyShape(),
-        'menu-paste': () => window.editor.pasteShape(),
-        'menu-delete': () => window.editor.deleteShape()
-    };
-
-    Object.keys(menuItems).forEach(id => {
-        const btn = document.getElementById(id);
-        if (btn) {
-            btn.addEventListener('click', () => {
-                menuItems[id]();
-                dropdowns.forEach(d => d.classList.remove('open'));
-            });
-        }
-    });
-
-    // View menu functionality
-    const viewState = {
-        leftPanel: true,
-        colorPalette: true,
-        shapesPanel: true,
-        previewPanel: true,
-        timelinePanel: true
-    };
-
-    const toggleView = (panelId, selector, label) => {
-        const panel = document.querySelector(selector);
-        const btn = document.getElementById(panelId);
-        if (!panel || !btn) return;
-
-        const isVisible = panel.style.display !== 'none';
-        panel.style.display = isVisible ? 'none' : '';
-
-        // Update button text
-        btn.textContent = isVisible ? `✗ ${label}` : `✓ ${label}`;
-    };
-
-    // View toggle buttons
-    document.getElementById('view-left-panel')?.addEventListener('click', () => {
-        toggleView('view-left-panel', '.left-panel', 'Left Toolbar');
-    });
-
-    document.getElementById('view-color-palette')?.addEventListener('click', () => {
-        toggleView('view-color-palette', '.panel-box:has(#colorPalette)', 'Color Palette');
-    });
-
-    document.getElementById('view-shapes-panel')?.addEventListener('click', () => {
-        toggleView('view-shapes-panel', '.panel-box:has(.tabs)', 'Shapes/History');
-    });
-
-    document.getElementById('view-preview-panel')?.addEventListener('click', () => {
-        toggleView('view-preview-panel', '.preview-panel', 'Preview');
-    });
-
-    document.getElementById('view-timeline-panel')?.addEventListener('click', () => {
-        toggleView('view-timeline-panel', '.timeline-panel', 'Timeline');
-    });
-
-    // Toggle Grid
-    document.getElementById('view-toggle-grid')?.addEventListener('click', () => {
-        window.editor.showGrid = !window.editor.showGrid;
-        const toggleGrid = document.getElementById('toggle-grid');
-        if (toggleGrid) {
-            toggleGrid.textContent = window.editor.showGrid ? 'Hide Grid' : 'Show Grid';
-        }
-        window.editor.render();
-    });
-
-    // Toggle Outline
-    document.getElementById('view-toggle-outline')?.addEventListener('click', () => {
-        // Toggle outline for all selected shapes
-        if (window.editor.selectedShapes.length > 0) {
-            const newOutlineState = !window.editor.selectedShapes[0].outline;
-            window.editor.selectedShapes.forEach(shape => {
-                shape.outline = newOutlineState;
-            });
-            window.editor.render();
-        } else if (window.editor.selectedShape) {
-            window.editor.selectedShape.outline = !window.editor.selectedShape.outline;
-            window.editor.render();
-        }
-    });
-
-    // Zen mode - hide all panels
-    document.getElementById('view-zen-mode')?.addEventListener('click', () => {
-        const allHidden = document.querySelector('.left-panel').style.display === 'none';
-
-        if (allHidden) {
-            // Restore all panels
-            document.querySelector('.left-panel').style.display = '';
-            document.querySelector('.panel-box:has(#colorPalette)').style.display = '';
-            document.querySelector('.panel-box:has(.tabs)').style.display = '';
-            document.querySelector('.preview-panel').style.display = '';
-            document.querySelector('.timeline-panel').style.display = '';
-
-            document.getElementById('view-left-panel').textContent = '✓ Left Toolbar';
-            document.getElementById('view-color-palette').textContent = '✓ Color Palette';
-            document.getElementById('view-shapes-panel').textContent = '✓ Shapes/History';
-            document.getElementById('view-preview-panel').textContent = '✓ Preview';
-            document.getElementById('view-timeline-panel').textContent = '✓ Timeline';
-
-            viewState.leftPanel = true;
-            viewState.colorPalette = true;
-            viewState.shapesPanel = true;
-            viewState.previewPanel = true;
-            viewState.timelinePanel = true;
-        } else {
-            // Hide all panels
-            document.querySelector('.left-panel').style.display = 'none';
-            document.querySelector('.panel-box:has(#colorPalette)').style.display = 'none';
-            document.querySelector('.panel-box:has(.tabs)').style.display = 'none';
-            document.querySelector('.preview-panel').style.display = 'none';
-            document.querySelector('.timeline-panel').style.display = 'none';
-
-            document.getElementById('view-left-panel').textContent = '✗ Left Toolbar';
-            document.getElementById('view-color-palette').textContent = '✗ Color Palette';
-            document.getElementById('view-shapes-panel').textContent = '✗ Shapes/History';
-            document.getElementById('view-preview-panel').textContent = '✗ Preview';
-            document.getElementById('view-timeline-panel').textContent = '✗ Timeline';
-
-            viewState.leftPanel = false;
-            viewState.colorPalette = false;
-            viewState.shapesPanel = false;
-            viewState.previewPanel = false;
-            viewState.timelinePanel = false;
-        }
-    });
-
-    // Canvas Ratio
-    const updateRatioUI = () => {
-        ['1-1', '16-9', '4-3', '3-2'].forEach(ratio => {
-            const btn = document.getElementById(`canvas-ratio-${ratio}`);
-            if (btn) {
-                const currentRatio = window.editor.aspectRatio.replace(':', '-');
-                btn.textContent = ratio === currentRatio ? `● ${ratio.replace('-', ':')} ${ratio === '1-1' ? '(Square)' : ''}` : ratio.replace('-', ':');
-            }
-        });
-    };
-
-    document.getElementById('canvas-ratio-1-1')?.addEventListener('click', () => {
-        window.editor.aspectRatio = '1:1';
-        window.editor.updateCanvasDimensions();
-        updateRatioUI();
-    });
-
-    document.getElementById('canvas-ratio-16-9')?.addEventListener('click', () => {
-        window.editor.aspectRatio = '16:9';
-        window.editor.updateCanvasDimensions();
-        updateRatioUI();
-    });
-
-    document.getElementById('canvas-ratio-4-3')?.addEventListener('click', () => {
-        window.editor.aspectRatio = '4:3';
-        window.editor.updateCanvasDimensions();
-        updateRatioUI();
-    });
-
-    document.getElementById('canvas-ratio-3-2')?.addEventListener('click', () => {
-        window.editor.aspectRatio = '3:2';
-        window.editor.updateCanvasDimensions();
-        updateRatioUI();
-    });
-
-    // Canvas Orientation
-    const updateOrientationUI = () => {
-        const landscapeBtn = document.getElementById('canvas-orientation-landscape');
-        const portraitBtn = document.getElementById('canvas-orientation-portrait');
-        if (landscapeBtn) landscapeBtn.textContent = window.editor.orientation === 'landscape' ? '● Landscape' : 'Landscape';
-        if (portraitBtn) portraitBtn.textContent = window.editor.orientation === 'portrait' ? '● Portrait' : 'Portrait';
-    };
-
-    document.getElementById('canvas-orientation-landscape')?.addEventListener('click', () => {
-        window.editor.orientation = 'landscape';
-        window.editor.updateCanvasDimensions();
-        updateOrientationUI();
-    });
-
-    document.getElementById('canvas-orientation-portrait')?.addEventListener('click', () => {
-        window.editor.orientation = 'portrait';
-        window.editor.updateCanvasDimensions();
-        updateOrientationUI();
-    });
-
-    // Grid Size
-    const updateGridUI = () => {
-        ['off', '8', '16', '32', '64'].forEach(size => {
-            const btn = document.getElementById(`canvas-grid-${size}`);
-            if (btn) {
-                const currentGrid = size === 'off' ? 0 : parseInt(size);
-                const isActive = window.editor.gridCells === currentGrid;
-                btn.textContent = isActive ? `● ${size === 'off' ? 'Off' : size + '×' + size}` : (size === 'off' ? 'Off' : size + '×' + size);
-            }
-        });
-    };
-
-    document.getElementById('canvas-grid-off')?.addEventListener('click', () => {
-        window.editor.gridCells = 0;
-        window.editor.updateDitherScaleForGrid();
-        window.editor.render();
-        updateGridUI();
-    });
-
-    document.getElementById('canvas-grid-8')?.addEventListener('click', () => {
-        window.editor.gridCells = 8;
-        window.editor.updateDitherScaleForGrid();
-        window.editor.render();
-        updateGridUI();
-    });
-
-    document.getElementById('canvas-grid-16')?.addEventListener('click', () => {
-        window.editor.gridCells = 16;
-        window.editor.updateDitherScaleForGrid();
-        window.editor.render();
-        updateGridUI();
-    });
-
-    document.getElementById('canvas-grid-32')?.addEventListener('click', () => {
-        window.editor.gridCells = 32;
-        window.editor.updateDitherScaleForGrid();
-        window.editor.render();
-        updateGridUI();
-    });
-
-    document.getElementById('canvas-grid-64')?.addEventListener('click', () => {
-        window.editor.gridCells = 64;
-        window.editor.updateDitherScaleForGrid();
-        window.editor.render();
-        updateGridUI();
-    });
-
-    // Initialize UI
-    updateRatioUI();
-    updateOrientationUI();
-    updateGridUI();
-
-    // Preview mode buttons
-    document.getElementById('preview-actual')?.addEventListener('click', function() {
-        document.getElementById('preview-actual').classList.add('active');
-        document.getElementById('preview-repeat').classList.remove('active');
-        window.editor.previewMode = 'actual';
-        window.editor.updatePreview();
-    });
-
-    document.getElementById('preview-repeat')?.addEventListener('click', function() {
-        document.getElementById('preview-repeat').classList.add('active');
-        document.getElementById('preview-actual').classList.remove('active');
-        window.editor.previewMode = 'repeat';
-        window.editor.updatePreview();
-    });
-
-    // Close all dropdowns when clicking outside
-    document.addEventListener('click', () => {
-        dropdowns.forEach(d => d.classList.remove('open'));
-    });
-});
+// Export helper functions for use in other modules
+export { helpers, math };
