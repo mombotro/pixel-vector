@@ -5,6 +5,9 @@
 
 import * as helpers from '../utils/helpers.js';
 import * as math from '../utils/math.js';
+import { storageManager } from '../utils/storage.js';
+import { thumbnailManager } from '../utils/thumbnail-manager.js';
+import { AdaptiveVirtualList } from '../utils/virtual-list.js';
 
 export class VectorEditor {
     constructor() {
@@ -126,6 +129,7 @@ export class VectorEditor {
         this.history = [];
         this.historyIndex = -1;
         this.maxHistory = 50;
+        this.historyVirtualList = null;
 
         // Grid settings
         this.gridCells = 32; // 0 = off, 8 = 8x8 cells, 16 = 16x16 cells, etc.
@@ -179,13 +183,16 @@ export class VectorEditor {
         this.init();
     }
 
-    init() {
+    async init() {
         this.setupColorPalette();
         this.setupEventListeners();
         this.updateCanvasDimensions();
         this.setupPreview();
         this.setupDither();
         this.setupAnimation();
+        await this.setupStorage();
+        this.setupThumbnailWorker();
+        this.setupVirtualLists();
         this.render();
     }
 
@@ -448,6 +455,150 @@ export class VectorEditor {
         this.updateFrameThumbnails();
     }
 
+    setupThumbnailWorker() {
+        // Initialize the thumbnail worker for async rendering
+        thumbnailManager.init();
+    }
+
+    setupVirtualLists() {
+        // Initialize virtual list for history (adaptive - only enables for 50+ items)
+        const historyContainer = document.getElementById('historyList');
+        if (historyContainer) {
+            this.historyVirtualList = new AdaptiveVirtualList(historyContainer, {
+                threshold: 30, // Enable virtual scrolling above 30 history states
+                itemHeight: 32, // Height of each history item
+                overscan: 5,
+                renderItem: (item, index) => this.renderHistoryItem(item, index),
+                onItemClick: (item, index) => this.jumpToHistory(index - 1) // -1 because first item is "blank canvas"
+            });
+        }
+    }
+
+    async setupStorage() {
+        try {
+            // Initialize IndexedDB
+            await storageManager.init();
+
+            // Set up save status callback
+            storageManager.setSaveCallback((isAutoSave) => {
+                this.updateSaveStatus(isAutoSave);
+            });
+
+            // Check for crash recovery auto-save
+            const autoSave = await storageManager.checkAutoSave();
+            if (autoSave.exists) {
+                const timeSinceAutoSave = storageManager.formatTimestamp(autoSave.timestamp);
+                const shouldRecover = confirm(
+                    `Found auto-saved work from ${timeSinceAutoSave}.\n\nWould you like to recover it?`
+                );
+
+                if (shouldRecover) {
+                    this.loadFromData(autoSave.data);
+                    console.log('✅ Recovered from auto-save');
+                } else {
+                    // Clear the auto-save if user doesn't want it
+                    await storageManager.deleteProject('autosave');
+                }
+            }
+
+            // Start auto-save (every 30 seconds)
+            storageManager.startAutoSave(() => {
+                return this.getProjectData();
+            }, 30000);
+
+            // Mark dirty on shape changes
+            this.setupDirtyTracking();
+
+            // Update initial status
+            this.updateSaveStatus(false);
+
+        } catch (error) {
+            console.error('Failed to initialize storage:', error);
+            // Update UI to show error
+            const statusText = document.getElementById('save-status-text');
+            if (statusText) {
+                statusText.textContent = 'Auto-save unavailable';
+                statusText.style.color = '#888';
+            }
+        }
+    }
+
+    setupDirtyTracking() {
+        // Override saveHistory to mark dirty
+        const originalSaveHistory = this.saveHistory.bind(this);
+        this.saveHistory = () => {
+            originalSaveHistory();
+            storageManager.markDirty();
+        };
+    }
+
+    updateSaveStatus(isAutoSave) {
+        const statusIcon = document.getElementById('save-status-icon');
+        const statusText = document.getElementById('save-status-text');
+
+        if (!statusIcon || !statusText) return;
+
+        if (isAutoSave) {
+            // Show auto-saved feedback
+            statusIcon.textContent = '✓';
+            statusText.textContent = 'Auto-saved';
+            statusText.style.color = '#00ff88';
+
+            // Reset to default after 2 seconds
+            setTimeout(() => {
+                statusIcon.textContent = '💾';
+                statusText.textContent = 'Auto-save enabled';
+                statusText.style.color = '#00d9ff';
+            }, 2000);
+        } else {
+            // Initial state
+            statusIcon.textContent = '💾';
+            statusText.textContent = 'Auto-save enabled';
+            statusText.style.color = '#00d9ff';
+        }
+    }
+
+    getProjectData() {
+        // Get current project state for saving
+        return {
+            shapes: this.shapes,
+            frames: this.frames,
+            currentFrame: this.currentFrame,
+            backgroundColor: this.backgroundColor,
+            gridCells: this.gridCells,
+            aspectRatio: this.aspectRatio,
+            orientation: this.orientation,
+            currentPalette: this.currentPalette,
+            palettes: this.palettes,
+            paletteNames: this.paletteNames,
+            fps: this.fps,
+            loopMode: this.loopMode
+        };
+    }
+
+    loadFromData(data) {
+        // Load project state from saved data
+        if (data.shapes) this.shapes = data.shapes;
+        if (data.frames) this.frames = data.frames;
+        if (data.currentFrame !== undefined) this.currentFrame = data.currentFrame;
+        if (data.backgroundColor) this.backgroundColor = data.backgroundColor;
+        if (data.gridCells !== undefined) this.gridCells = data.gridCells;
+        if (data.aspectRatio) this.aspectRatio = data.aspectRatio;
+        if (data.orientation) this.orientation = data.orientation;
+        if (data.currentPalette) this.currentPalette = data.currentPalette;
+        if (data.palettes) this.palettes = data.palettes;
+        if (data.paletteNames) this.paletteNames = data.paletteNames;
+        if (data.fps) this.fps = data.fps;
+        if (data.loopMode) this.loopMode = data.loopMode;
+
+        // Update UI
+        this.updateCanvasDimensions();
+        this.colors = this.palettes[this.currentPalette];
+        this.setupColorPalette();
+        this.updateFrameThumbnails();
+        this.loadFrame(this.currentFrame);
+    }
+
     addFrame() {
         // Add empty frame after current frame
         const newFrameNumber = this.frames.length + 1;
@@ -630,6 +781,61 @@ export class VectorEditor {
         this.updateFrameThumbnails();
     }
 
+    async renderFrameThumbnail(canvas, frame, frameIndex) {
+        const ctx = canvas.getContext('2d');
+
+        // Try worker-based rendering first
+        if (thumbnailManager.isAvailable()) {
+            try {
+                const bitmap = await thumbnailManager.renderThumbnail(
+                    frameIndex,
+                    frame.shapes,
+                    64,
+                    64,
+                    this.backgroundColor,
+                    this.colors,
+                    this.gridCells
+                );
+
+                // Draw the bitmap to the canvas
+                ctx.drawImage(bitmap, 0, 0);
+                return;
+            } catch (error) {
+                console.warn('Worker thumbnail failed, using fallback:', error);
+                // Fall through to synchronous rendering
+            }
+        }
+
+        // Fallback: synchronous rendering on main thread
+        ctx.fillStyle = this.backgroundColor;
+        ctx.fillRect(0, 0, 64, 64);
+
+        const scaleX = 64 / this.canvasWidth;
+        const scaleY = 64 / this.canvasHeight;
+
+        ctx.save();
+        ctx.scale(scaleX, scaleY);
+
+        // Temporarily load frame for rendering
+        const savedShapes = this.shapes;
+        const savedCtx = this.ctx;
+        const savedScale = this.scale;
+
+        this.shapes = frame.shapes;
+        this.ctx = ctx;
+        this.scale = 1;
+
+        frame.shapes.forEach(shape => {
+            this.drawShape(shape, false);
+        });
+
+        this.shapes = savedShapes;
+        this.ctx = savedCtx;
+        this.scale = savedScale;
+
+        ctx.restore();
+    }
+
     updateFrameThumbnails() {
         const container = document.getElementById('frame-thumbnails');
         if (!container) return;
@@ -660,38 +866,9 @@ export class VectorEditor {
             thumbCanvas.width = 64;
             thumbCanvas.height = 64;
             thumbCanvas.style.cssText = 'image-rendering: pixelated; border-radius: 2px;';
-            const thumbCtx = thumbCanvas.getContext('2d');
 
-            // Render frame to thumbnail
-            thumbCtx.fillStyle = this.backgroundColor;
-            thumbCtx.fillRect(0, 0, 64, 64);
-
-            const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
-            const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-            const scaleX = 64 / this.canvasWidth;
-            const scaleY = 64 / this.canvasHeight;
-
-            thumbCtx.save();
-            thumbCtx.scale(scaleX, scaleY);
-
-            // Temporarily load frame for rendering
-            const savedShapes = this.shapes;
-            const savedCtx = this.ctx;
-            const savedScale = this.scale;
-
-            this.shapes = frame.shapes;
-            this.ctx = thumbCtx;
-            this.scale = 1;
-
-            frame.shapes.forEach(shape => {
-                this.drawShape(shape, false);
-            });
-
-            this.shapes = savedShapes;
-            this.ctx = savedCtx;
-            this.scale = savedScale;
-
-            thumbCtx.restore();
+            // Render frame to thumbnail (async if worker available, sync fallback)
+            this.renderFrameThumbnail(thumbCanvas, frame, index);
 
             // Create info container for name and hold
             const infoContainer = document.createElement('div');
@@ -5595,64 +5772,46 @@ export class VectorEditor {
         modal.addEventListener('click', backdropHandler);
     }
 
-    updateHistoryPreview() {
-        const listElement = document.getElementById('historyList');
-        if (!listElement) return;
+    renderHistoryItem(state, index) {
+        const item = document.createElement('div');
+        item.className = 'history-item';
 
-        listElement.innerHTML = '';
+        // index 0 is blank canvas, 1+ are history states
+        const isBlankCanvas = index === 0;
+        const historyIndex = isBlankCanvas ? -1 : index - 1;
 
-        // Add "Blank canvas" entry at the beginning
-        const blankItem = document.createElement('div');
-        blankItem.className = 'history-item';
-        if (this.historyIndex === -1) {
-            blankItem.classList.add('current');
+        // Mark current state
+        if (historyIndex === this.historyIndex) {
+            item.classList.add('current');
         }
 
-        const blankIcon = document.createElement('div');
-        blankIcon.className = 'history-icon';
-        blankIcon.textContent = this.historyIndex === -1 ? '●' : '∅';
+        // Create icon
+        const icon = document.createElement('div');
+        icon.className = 'history-icon';
 
-        const blankLabel = document.createElement('div');
-        blankLabel.className = 'history-label';
-        blankLabel.textContent = `Blank canvas (${this.canvasWidth}×${this.canvasHeight})`;
-
-        blankItem.appendChild(blankIcon);
-        blankItem.appendChild(blankLabel);
-        blankItem.addEventListener('click', () => {
-            this.jumpToHistory(-1);
-        });
-        listElement.appendChild(blankItem);
-
-        if (this.history.length === 0) {
-            return;
+        if (isBlankCanvas) {
+            icon.textContent = this.historyIndex === -1 ? '●' : '∅';
+        } else {
+            icon.textContent = historyIndex === this.historyIndex ? '●' : (historyIndex + 1);
         }
 
-        // Create history items (oldest to newest, top to bottom)
-        this.history.forEach((state, index) => {
-            const item = document.createElement('div');
-            item.className = 'history-item';
+        // Create label
+        const label = document.createElement('div');
+        label.className = 'history-label';
 
-            // Mark current state
-            if (index === this.historyIndex) {
-                item.classList.add('current');
-            }
-
-            // Create icon
-            const icon = document.createElement('div');
-            icon.className = 'history-icon';
-            icon.textContent = index === this.historyIndex ? '●' : (index + 1);
-
-            // Create label with shape count
-            const label = document.createElement('div');
-            label.className = 'history-label';
+        if (isBlankCanvas) {
+            label.textContent = `Blank canvas (${this.canvasWidth}×${this.canvasHeight})`;
+        } else {
             const shapeCount = state.shapes ? state.shapes.length : state.length;
             const canvasW = state.canvasWidth || this.canvasWidth;
             const canvasH = state.canvasHeight || this.canvasHeight;
 
             // Determine action based on comparison with previous state
             let action = 'Initial';
-            if (index > 0) {
-                const prevCount = this.history[index - 1].shapes ? this.history[index - 1].shapes.length : this.history[index - 1].length;
+            if (historyIndex > 0) {
+                const prevCount = this.history[historyIndex - 1].shapes ?
+                    this.history[historyIndex - 1].shapes.length :
+                    this.history[historyIndex - 1].length;
                 if (shapeCount > prevCount) {
                     action = 'Add shape';
                 } else if (shapeCount < prevCount) {
@@ -5663,24 +5822,30 @@ export class VectorEditor {
             }
 
             label.textContent = `${action} (${shapeCount} shape${shapeCount !== 1 ? 's' : ''}, ${canvasW}×${canvasH})`;
+        }
 
-            // Assemble item
-            item.appendChild(icon);
-            item.appendChild(label);
+        // Assemble item
+        item.appendChild(icon);
+        item.appendChild(label);
 
-            // Add click handler to jump to this state
-            item.addEventListener('click', () => {
-                this.jumpToHistory(index);
-            });
+        return item;
+    }
 
-            listElement.appendChild(item);
-        });
+    updateHistoryPreview() {
+        if (!this.historyVirtualList) return;
+
+        // Prepare items array: [blank canvas state, ...history states]
+        const items = [
+            { isBlankCanvas: true }, // Placeholder for blank canvas
+            ...this.history
+        ];
+
+        // Update virtual list
+        this.historyVirtualList.setItems(items);
 
         // Auto-scroll to current item
-        const currentItem = listElement.querySelector('.history-item.current');
-        if (currentItem) {
-            currentItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-        }
+        const scrollIndex = this.historyIndex + 1; // +1 because blank canvas is at index 0
+        this.historyVirtualList.scrollToIndex(scrollIndex);
     }
 
     jumpToHistory(targetIndex) {

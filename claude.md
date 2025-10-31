@@ -51,6 +51,17 @@ Azirona Vexel Edit is a vector-based pixel art editor that allows users to creat
 - 50-step history
 - Tracks shape modifications, additions, deletions
 - Only saves history when shapes actually change (not on selection)
+- **Virtual scrolling**: Adaptive virtual scrolling for 30+ history items (renders only visible items)
+
+### Auto-Save & Crash Recovery
+- **Automatic saving**: Work auto-saved every 30 seconds to IndexedDB
+- **Crash recovery**: On startup, detects unsaved auto-save and prompts user to recover
+- **Smart saving**: Only saves when changes detected (dirty flag tracking)
+- **Status indicator**: Shows "Auto-save enabled" in settings bar, turns green after save
+- **User control**: Can decline recovery prompt to start fresh
+- **Local storage**: All data stays in browser's IndexedDB (no server uploads)
+- **Project data**: Saves shapes, frames, settings, palettes, FPS, animation settings
+- **Graceful fallback**: If IndexedDB unavailable, continues without auto-save
 
 ### Export System
 
