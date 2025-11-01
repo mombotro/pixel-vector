@@ -68,7 +68,7 @@ class ThumbnailManager {
      * Render a thumbnail using the worker
      * Returns a Promise that resolves with an ImageBitmap
      */
-    renderThumbnail(frameIndex, shapes, width, height, backgroundColor, colors, gridCells) {
+    renderThumbnail(frameIndex, shapes, width, height, backgroundColor, colors, gridCells, canvasWidth, canvasHeight) {
         // If worker not available, return null to use fallback
         if (!this.supportsOffscreenCanvas || !this.worker) {
             return null;
@@ -88,7 +88,9 @@ class ThumbnailManager {
                     height,
                     backgroundColor,
                     colors,
-                    gridCells
+                    gridCells,
+                    canvasWidth,   // Actual canvas dimensions for scaling
+                    canvasHeight
                 }
             });
 

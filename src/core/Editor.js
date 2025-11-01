@@ -8,6 +8,8 @@ import * as math from '../utils/math.js';
 import { storageManager } from '../utils/storage.js';
 import { thumbnailManager } from '../utils/thumbnail-manager.js';
 import { AdaptiveVirtualList } from '../utils/virtual-list.js';
+import { ImageDataBuffer } from '../utils/image-buffer.js';
+import { geometryManager } from '../utils/geometry-manager.js';
 
 export class VectorEditor {
     constructor() {
@@ -19,6 +21,9 @@ export class VectorEditor {
 
         // Disable antialiasing for pixel-perfect rendering
         this.ctx.imageSmoothingEnabled = false;
+
+        // ImageData buffer for batch pixel operations
+        this.imageBuffer = null; // Will be initialized in init()
 
         // Color palettes
         this.palettes = {
@@ -101,6 +106,8 @@ export class VectorEditor {
         this.currentTool = 'line';
         this.lineWidth = 1; // Current line width in pixels
         this.shapes = [];
+        this.groups = []; // Array of groups: {id, name, collapsed}
+        this.nextGroupId = 1; // Auto-increment for group IDs
         this.currentPoints = [];
         this.selectedShape = null;
         this.selectedShapes = []; // Multiple selected shapes
@@ -187,13 +194,26 @@ export class VectorEditor {
         this.setupColorPalette();
         this.setupEventListeners();
         this.updateCanvasDimensions();
+        // this.initializeImageBuffer(); // DISABLED - conflicts with direct canvas operations
         this.setupPreview();
         this.setupDither();
         this.setupAnimation();
         await this.setupStorage();
         this.setupThumbnailWorker();
+        this.setupGeometryWorker();
         this.setupVirtualLists();
         this.render();
+    }
+
+    initializeImageBuffer() {
+        // Create ImageData buffer for batch pixel operations
+        this.imageBuffer = new ImageDataBuffer(
+            this.ctx,
+            this.canvasWidth,
+            this.canvasHeight,
+            this.scale
+        );
+        console.log('✅ ImageData buffer initialized:', this.canvasWidth, 'x', this.canvasHeight, '@', this.scale + 'x');
     }
 
     setupPreview() {
@@ -458,6 +478,11 @@ export class VectorEditor {
     setupThumbnailWorker() {
         // Initialize the thumbnail worker for async rendering
         thumbnailManager.init();
+    }
+
+    setupGeometryWorker() {
+        // Initialize the geometry worker for async boolean operations
+        geometryManager.init();
     }
 
     setupVirtualLists() {
@@ -784,65 +809,38 @@ export class VectorEditor {
     async renderFrameThumbnail(canvas, frame, frameIndex) {
         const ctx = canvas.getContext('2d');
 
-        // Try worker-based rendering first
-        if (thumbnailManager.isAvailable()) {
-            try {
-                const bitmap = await thumbnailManager.renderThumbnail(
-                    frameIndex,
-                    frame.shapes,
-                    64,
-                    64,
-                    this.backgroundColor,
-                    this.colors,
-                    this.gridCells
-                );
-
-                // Draw the bitmap to the canvas
-                ctx.drawImage(bitmap, 0, 0);
-                return;
-            } catch (error) {
-                console.warn('Worker thumbnail failed, using fallback:', error);
-                // Fall through to synchronous rendering
-            }
-        }
-
-        // Fallback: synchronous rendering on main thread
+        // Use synchronous rendering on main thread (same approach as preview)
+        ctx.imageSmoothingEnabled = false;
         ctx.fillStyle = this.backgroundColor;
         ctx.fillRect(0, 0, 64, 64);
 
+        // Calculate scale factor to fit canvas into 64x64 thumbnail
         const scaleX = 64 / this.canvasWidth;
         const scaleY = 64 / this.canvasHeight;
+        const scale = Math.min(scaleX, scaleY);
 
+        // Use ctx.scale() like the preview does
         ctx.save();
-        ctx.scale(scaleX, scaleY);
+        ctx.scale(scale, scale);
 
-        // Temporarily load frame for rendering
-        const savedShapes = this.shapes;
-        const savedCtx = this.ctx;
-        const savedScale = this.scale;
-
-        this.shapes = frame.shapes;
-        this.ctx = ctx;
-        this.scale = 1;
-
+        // Draw shapes with original coordinates (context is scaled, skip hidden)
         frame.shapes.forEach(shape => {
-            this.drawShape(shape, false);
+            if (!shape.hidden) {
+                this.drawShape(shape, ctx, 1);
+            }
         });
-
-        this.shapes = savedShapes;
-        this.ctx = savedCtx;
-        this.scale = savedScale;
 
         ctx.restore();
     }
 
-    updateFrameThumbnails() {
+    async updateFrameThumbnails() {
         const container = document.getElementById('frame-thumbnails');
         if (!container) return;
 
         container.innerHTML = '';
 
-        this.frames.forEach((frame, index) => {
+        for (let index = 0; index < this.frames.length; index++) {
+            const frame = this.frames[index];
             const thumbnail = document.createElement('div');
             thumbnail.draggable = true;
             thumbnail.dataset.frameIndex = index;
@@ -867,8 +865,8 @@ export class VectorEditor {
             thumbCanvas.height = 64;
             thumbCanvas.style.cssText = 'image-rendering: pixelated; border-radius: 2px;';
 
-            // Render frame to thumbnail (async if worker available, sync fallback)
-            this.renderFrameThumbnail(thumbCanvas, frame, index);
+            // Render frame to thumbnail (await async rendering)
+            await this.renderFrameThumbnail(thumbCanvas, frame, index);
 
             // Create info container for name and hold
             const infoContainer = document.createElement('div');
@@ -988,7 +986,7 @@ export class VectorEditor {
             });
 
             container.appendChild(thumbnail);
-        });
+        }
     }
 
     updatePreview() {
@@ -1021,9 +1019,11 @@ export class VectorEditor {
             this.previewCtx.save();
             this.previewCtx.scale(scaleX, scaleY);
 
-            // Draw all shapes scaled down to pixel size
+            // Draw all shapes scaled down to pixel size (skip hidden)
             this.shapes.forEach(shape => {
-                this.drawShape(shape, this.previewCtx, 1);
+                if (!shape.hidden) {
+                    this.drawShape(shape, this.previewCtx, 1);
+                }
             });
 
             this.previewCtx.restore();
@@ -1053,12 +1053,14 @@ export class VectorEditor {
                     this.previewCtx.fillStyle = this.backgroundColor;
                     this.previewCtx.fillRect(offsetX, offsetY, actualWidth, actualHeight);
 
-                    // Draw all shapes with offset and scaling
+                    // Draw all shapes with offset and scaling (skip hidden)
                     this.previewCtx.save();
                     this.previewCtx.translate(offsetX, offsetY);
                     this.previewCtx.scale(scaleX, scaleY);
                     this.shapes.forEach(shape => {
-                        this.drawShape(shape, this.previewCtx, 1);
+                        if (!shape.hidden) {
+                            this.drawShape(shape, this.previewCtx, 1);
+                        }
                     });
                     this.previewCtx.restore();
                 }
@@ -1335,6 +1337,10 @@ export class VectorEditor {
         // Simplify button
         document.getElementById('tool-simplify').addEventListener('click', () => this.simplifySelectedShapes());
 
+        // Group buttons
+        document.getElementById('tool-create-group').addEventListener('click', () => this.createGroup());
+        document.getElementById('tool-ungroup').addEventListener('click', () => this.ungroupShapes());
+
         // Grid dropdown (if exists)
         const gridSize = document.getElementById('grid-size');
         if (gridSize) {
@@ -1404,12 +1410,17 @@ export class VectorEditor {
             this.addColorToCustomPalette();
         });
 
-        // Background color picker (if exists)
-        const bgColor = document.getElementById('bg-color');
-        if (bgColor) {
-            bgColor.addEventListener('input', (e) => {
+        // Background color picker
+        const bgColorPicker = document.getElementById('background-color-picker');
+        if (bgColorPicker) {
+            // Set initial value from current background color
+            bgColorPicker.value = this.backgroundColor;
+
+            // Update background color on change
+            bgColorPicker.addEventListener('input', (e) => {
                 this.backgroundColor = e.target.value;
                 this.render();
+                this.updatePreview();
             });
         }
 
@@ -1564,6 +1575,12 @@ export class VectorEditor {
         this.canvasHeight = height;
         this.canvas.width = width * this.scale;
         this.canvas.height = height * this.scale;
+
+        // // Resize ImageData buffer if it exists
+        // if (this.imageBuffer) {
+        //     this.imageBuffer.resize(width, height, this.scale);
+        // }
+
         this.render();
     }
 
@@ -1619,7 +1636,9 @@ export class VectorEditor {
             'select': 'Select'
         };
         const info = document.getElementById('toolInfo');
-        info.textContent = `Tool: ${toolNames[this.currentTool] || this.currentTool} | ${this.getToolHint()}`;
+        if (info) {
+            info.textContent = `Tool: ${toolNames[this.currentTool] || this.currentTool} | ${this.getToolHint()}`;
+        }
     }
 
     getToolHint() {
@@ -2316,28 +2335,66 @@ export class VectorEditor {
             this.selectedShapes = newShapes;
             this.selectedShape = newShapes.length === 1 ? newShapes[0] : null;
             this.saveHistory();
+            this.saveCurrentFrame();
+            this.updateShapeOrderPreview();
             this.render();
         }
     }
 
     deleteShape() {
         if (this.selectedShapes.length > 0) {
-            // Delete all selected shapes
+            const deletedGroupIds = new Set();
+
+            // Delete all selected shapes and track their groups
             this.selectedShapes.forEach(shape => {
+                if (shape.groupId) {
+                    deletedGroupIds.add(shape.groupId);
+                }
                 const index = this.shapes.indexOf(shape);
                 if (index > -1) {
                     this.shapes.splice(index, 1);
                 }
             });
+
+            // Clean up empty groups
+            deletedGroupIds.forEach(groupId => {
+                const hasShapes = this.shapes.some(shape => shape.groupId === groupId);
+                if (!hasShapes) {
+                    const groupIndex = this.groups.findIndex(g => g.id === groupId);
+                    if (groupIndex > -1) {
+                        this.groups.splice(groupIndex, 1);
+                    }
+                }
+            });
+
             this.selectedShapes = [];
             this.selectedShape = null;
             this.selectedPoint = null;
             this.saveHistory();
+            this.saveCurrentFrame();
+            this.updateShapeOrderPreview();
             this.render();
         } else if (this.shapes.length > 0) {
             // Delete last shape if none selected
+            const lastShape = this.shapes[this.shapes.length - 1];
+            const groupId = lastShape.groupId;
+
             this.shapes.pop();
+
+            // Clean up empty group if this was the last shape in the group
+            if (groupId) {
+                const hasShapes = this.shapes.some(shape => shape.groupId === groupId);
+                if (!hasShapes) {
+                    const groupIndex = this.groups.findIndex(g => g.id === groupId);
+                    if (groupIndex > -1) {
+                        this.groups.splice(groupIndex, 1);
+                    }
+                }
+            }
+
             this.saveHistory();
+            this.saveCurrentFrame();
+            this.updateShapeOrderPreview();
             this.render();
         }
     }
@@ -2413,30 +2470,55 @@ export class VectorEditor {
         this.updateShapeOrderPreview();
     }
 
-    booleanUnion() {
+    async booleanUnion() {
         if (this.selectedShapes.length < 2) {
             alert('Select at least 2 shapes to perform union operation');
             return;
         }
 
-        // First shape is the base, last clicked shape is added to it
         const baseShape = this.selectedShapes[0];
-        const addShape = this.selectedShapes[this.selectedShapes.length - 1];
+        const color = baseShape.color;
 
-        // Get bounding box of both shapes combined
-        const pixels = this.rasterizeShapesToPixels([baseShape, addShape]);
+        // Try worker-based operation first
+        if (geometryManager.isAvailable()) {
+            try {
+                const newShape = await geometryManager.booleanUnion(
+                    this.selectedShapes,
+                    this.canvasWidth,
+                    this.canvasHeight,
+                    color
+                );
 
-        // Create new polygon from combined pixels
-        const newShape = this.pixelsToPolygon(pixels, baseShape.color);
+                if (newShape) {
+                    // Remove all selected shapes
+                    this.selectedShapes.forEach(shape => {
+                        const index = this.shapes.indexOf(shape);
+                        if (index > -1) this.shapes.splice(index, 1);
+                    });
+
+                    // Add new combined shape
+                    this.shapes.push(newShape);
+                    this.selectedShapes = [newShape];
+                    this.selectedShape = newShape;
+                    this.saveHistory();
+                    this.render();
+                }
+                return;
+            } catch (error) {
+                console.warn('Worker boolean union failed, falling back to main thread:', error);
+            }
+        }
+
+        // Fallback to main thread
+        const pixels = this.rasterizeShapesToPixels(this.selectedShapes);
+        const newShape = this.pixelsToPolygon(pixels, color);
 
         if (newShape) {
-            // Remove both shapes
             this.selectedShapes.forEach(shape => {
                 const index = this.shapes.indexOf(shape);
                 if (index > -1) this.shapes.splice(index, 1);
             });
 
-            // Add new combined shape
             this.shapes.push(newShape);
             this.selectedShapes = [newShape];
             this.selectedShape = newShape;
@@ -2445,34 +2527,57 @@ export class VectorEditor {
         }
     }
 
-    booleanSubtract() {
+    async booleanSubtract() {
         if (this.selectedShapes.length < 2) {
             alert('Select at least 2 shapes to perform subtract operation');
             return;
         }
 
-        // First shape is the base, last clicked shape is removed from it
         const baseShape = this.selectedShapes[0];
         const subtractShape = this.selectedShapes[this.selectedShapes.length - 1];
+        const color = baseShape.color;
 
-        // Rasterize both shapes
+        // Try worker-based operation first
+        if (geometryManager.isAvailable()) {
+            try {
+                const newShape = await geometryManager.booleanSubtract(
+                    baseShape,
+                    subtractShape,
+                    this.canvasWidth,
+                    this.canvasHeight,
+                    color
+                );
+
+                if (newShape) {
+                    this.selectedShapes.forEach(shape => {
+                        const index = this.shapes.indexOf(shape);
+                        if (index > -1) this.shapes.splice(index, 1);
+                    });
+
+                    this.shapes.push(newShape);
+                    this.selectedShapes = [newShape];
+                    this.selectedShape = newShape;
+                    this.saveHistory();
+                    this.render();
+                }
+                return;
+            } catch (error) {
+                console.warn('Worker boolean subtract failed, falling back to main thread:', error);
+            }
+        }
+
+        // Fallback to main thread
         const basePixels = this.rasterizeShapesToPixels([baseShape]);
         const subtractPixels = this.rasterizeShapesToPixels([subtractShape]);
-
-        // Remove subtract pixels from base
         subtractPixels.forEach(key => basePixels.delete(key));
-
-        // Create new polygon from result
-        const newShape = this.pixelsToPolygon(basePixels, baseShape.color);
+        const newShape = this.pixelsToPolygon(basePixels, color);
 
         if (newShape) {
-            // Remove both shapes
             this.selectedShapes.forEach(shape => {
                 const index = this.shapes.indexOf(shape);
                 if (index > -1) this.shapes.splice(index, 1);
             });
 
-            // Add new shape
             this.shapes.push(newShape);
             this.selectedShapes = [newShape];
             this.selectedShape = newShape;
@@ -2481,36 +2586,62 @@ export class VectorEditor {
         }
     }
 
-    booleanIntersect() {
+    async booleanIntersect() {
         if (this.selectedShapes.length < 2) {
             alert('Select at least 2 shapes to perform intersect operation');
             return;
         }
 
-        // Keep only pixels that exist in both shapes
         const baseShape = this.selectedShapes[0];
         const intersectShape = this.selectedShapes[this.selectedShapes.length - 1];
+        const color = baseShape.color;
 
+        // Try worker-based operation first
+        if (geometryManager.isAvailable()) {
+            try {
+                const newShape = await geometryManager.booleanIntersect(
+                    baseShape,
+                    intersectShape,
+                    this.canvasWidth,
+                    this.canvasHeight,
+                    color
+                );
+
+                if (newShape) {
+                    this.selectedShapes.forEach(shape => {
+                        const index = this.shapes.indexOf(shape);
+                        if (index > -1) this.shapes.splice(index, 1);
+                    });
+
+                    this.shapes.push(newShape);
+                    this.selectedShapes = [newShape];
+                    this.selectedShape = newShape;
+                    this.saveHistory();
+                    this.render();
+                }
+                return;
+            } catch (error) {
+                console.warn('Worker boolean intersect failed, falling back to main thread:', error);
+            }
+        }
+
+        // Fallback to main thread
         const basePixels = this.rasterizeShapesToPixels([baseShape]);
         const intersectPixels = this.rasterizeShapesToPixels([intersectShape]);
 
-        // Keep only common pixels
         const result = new Set();
         basePixels.forEach(key => {
             if (intersectPixels.has(key)) result.add(key);
         });
 
-        // Create new polygon from result
-        const newShape = this.pixelsToPolygon(result, baseShape.color);
+        const newShape = this.pixelsToPolygon(result, color);
 
         if (newShape) {
-            // Remove both shapes
             this.selectedShapes.forEach(shape => {
                 const index = this.shapes.indexOf(shape);
                 if (index > -1) this.shapes.splice(index, 1);
             });
 
-            // Add new shape
             this.shapes.push(newShape);
             this.selectedShapes = [newShape];
             this.selectedShape = newShape;
@@ -2663,6 +2794,81 @@ export class VectorEditor {
             this.render();
         } else {
             alert('No simplification needed - shapes already have minimal nodes');
+        }
+    }
+
+    /**
+     * Create a group from selected shapes
+     */
+    createGroup() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one shape to create a group');
+            return;
+        }
+
+        // Create new group
+        const groupId = this.nextGroupId++;
+        const groupName = `Group ${groupId}`;
+
+        // Add group to groups array
+        this.groups.push({
+            id: groupId,
+            name: groupName,
+            collapsed: false
+        });
+
+        // Assign groupId to all selected shapes
+        this.selectedShapes.forEach(shape => {
+            shape.groupId = groupId;
+        });
+
+        console.log(`Created group "${groupName}" with ${this.selectedShapes.length} shapes`);
+
+        this.saveHistory();
+        this.saveCurrentFrame();
+        this.updateShapeOrderPreview();
+        this.render();
+    }
+
+    /**
+     * Ungroup selected shapes (remove them from their groups)
+     */
+    ungroupShapes() {
+        if (this.selectedShapes.length === 0) {
+            alert('Select at least one shape to ungroup');
+            return;
+        }
+
+        const affectedGroupIds = new Set();
+
+        // Remove groupId from all selected shapes
+        this.selectedShapes.forEach(shape => {
+            if (shape.groupId) {
+                affectedGroupIds.add(shape.groupId);
+                delete shape.groupId;
+            }
+        });
+
+        // Clean up empty groups (groups with no shapes)
+        affectedGroupIds.forEach(groupId => {
+            const hasShapes = this.shapes.some(shape => shape.groupId === groupId);
+            if (!hasShapes) {
+                const groupIndex = this.groups.findIndex(g => g.id === groupId);
+                if (groupIndex > -1) {
+                    console.log(`Removing empty group: ${this.groups[groupIndex].name}`);
+                    this.groups.splice(groupIndex, 1);
+                }
+            }
+        });
+
+        if (affectedGroupIds.size > 0) {
+            console.log(`Ungrouped ${this.selectedShapes.length} shapes from ${affectedGroupIds.size} group(s)`);
+            this.saveHistory();
+            this.saveCurrentFrame();
+            this.updateShapeOrderPreview();
+            this.render();
+        } else {
+            alert('Selected shapes are not in any group');
         }
     }
 
@@ -3244,7 +3450,9 @@ export class VectorEditor {
             customPalettes: customPalettes,
             customPaletteNames: customPaletteNames,
             gridCells: this.gridCells,
-            fps: this.fps
+            fps: this.fps,
+            groups: this.groups,
+            nextGroupId: this.nextGroupId
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -3283,7 +3491,10 @@ export class VectorEditor {
                             }
                             if (data.backgroundColor) {
                                 this.backgroundColor = data.backgroundColor;
-                                document.getElementById('bg-color').value = this.backgroundColor;
+                                const bgColorPicker = document.getElementById('background-color-picker');
+                                if (bgColorPicker) {
+                                    bgColorPicker.value = this.backgroundColor;
+                                }
                             }
 
                             // Restore custom palettes
@@ -3335,6 +3546,14 @@ export class VectorEditor {
                                 const fpsValue = document.getElementById('fps-value');
                                 if (fpsSlider) fpsSlider.value = this.fps;
                                 if (fpsValue) fpsValue.textContent = this.fps;
+                            }
+
+                            // Restore groups
+                            if (data.groups !== undefined) {
+                                this.groups = data.groups;
+                            }
+                            if (data.nextGroupId !== undefined) {
+                                this.nextGroupId = data.nextGroupId;
                             }
                         }
 
@@ -3490,152 +3709,16 @@ export class VectorEditor {
         cancelBtn.addEventListener('click', handleCancel);
     }
 
-    exportPNG(exportScale = 1, transparent = false) {
-        // Calculate pixel-perfect size
-        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
-        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-
-        // Get the current canvas image data
-        const srcCanvas = transparent ? this.createTransparentRender() : this.canvas;
-        const srcData = srcCanvas.getContext('2d').getImageData(0, 0, srcCanvas.width, srcCanvas.height);
-
-        // Downsample to pixel-perfect size
-        const pixelCanvas = document.createElement('canvas');
-        pixelCanvas.width = actualWidth;
-        pixelCanvas.height = actualHeight;
-        const pixelCtx = pixelCanvas.getContext('2d');
-        const dstData = pixelCtx.createImageData(actualWidth, actualHeight);
-
-        const scaleX = srcCanvas.width / actualWidth;
-        const scaleY = srcCanvas.height / actualHeight;
-
-        // Nearest-neighbor downsampling
-        for (let dy = 0; dy < actualHeight; dy++) {
-            for (let dx = 0; dx < actualWidth; dx++) {
-                const sx = Math.floor((dx + 0.5) * scaleX);
-                const sy = Math.floor((dy + 0.5) * scaleY);
-                const srcIdx = (sy * srcCanvas.width + sx) * 4;
-                const dstIdx = (dy * actualWidth + dx) * 4;
-
-                dstData.data[dstIdx] = srcData.data[srcIdx];
-                dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
-                dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
-                dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
-            }
-        }
-
-        pixelCtx.putImageData(dstData, 0, 0);
-
-        // Scale up if needed for export scale
-        let finalCanvas = pixelCanvas;
-        if (exportScale > 1) {
-            finalCanvas = document.createElement('canvas');
-            finalCanvas.width = actualWidth * exportScale;
-            finalCanvas.height = actualHeight * exportScale;
-            const finalCtx = finalCanvas.getContext('2d');
-
-            finalCtx.imageSmoothingEnabled = false;
-            finalCtx.mozImageSmoothingEnabled = false;
-            finalCtx.webkitImageSmoothingEnabled = false;
-            finalCtx.msImageSmoothingEnabled = false;
-
-            finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
-        }
-
-        // Download the image
-        finalCanvas.toBlob((blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'vector-art.png';
-            a.click();
-            URL.revokeObjectURL(url);
-        }, 'image/png');
+    async exportPNG(exportScale = 1, transparent = false) {
+        // Lazy load export module
+        const { exportPNG } = await import('../utils/export.js');
+        return exportPNG(this, exportScale, transparent);
     }
 
-    createTransparentRender() {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = this.canvas.width;
-        tempCanvas.height = this.canvas.height;
-        const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-
-        const savedCtx = this.ctx;
-        const savedCanvas = this.canvas;
-        const savedBg = this.backgroundColor;
-
-        this.ctx = tempCtx;
-        this.canvas = tempCanvas;
-        this.backgroundColor = 'rgba(0,0,0,0)';
-
-        this.render();
-
-        this.ctx = savedCtx;
-        this.canvas = savedCanvas;
-        this.backgroundColor = savedBg;
-
-        return tempCanvas;
-    }
-
-    exportJPG(exportScale = 1) {
-        // Calculate pixel-perfect size
-        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
-        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-
-        // Get the current canvas image data
-        const srcData = this.ctx.getImageData(0, 0, this.canvas.width, this.canvas.height);
-
-        // Downsample to pixel-perfect size
-        const pixelCanvas = document.createElement('canvas');
-        pixelCanvas.width = actualWidth;
-        pixelCanvas.height = actualHeight;
-        const pixelCtx = pixelCanvas.getContext('2d');
-        const dstData = pixelCtx.createImageData(actualWidth, actualHeight);
-
-        const scaleX = this.canvas.width / actualWidth;
-        const scaleY = this.canvas.height / actualHeight;
-
-        // Nearest-neighbor downsampling
-        for (let dy = 0; dy < actualHeight; dy++) {
-            for (let dx = 0; dx < actualWidth; dx++) {
-                const sx = Math.floor((dx + 0.5) * scaleX);
-                const sy = Math.floor((dy + 0.5) * scaleY);
-                const srcIdx = (sy * this.canvas.width + sx) * 4;
-                const dstIdx = (dy * actualWidth + dx) * 4;
-
-                dstData.data[dstIdx] = srcData.data[srcIdx];
-                dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
-                dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
-                dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
-            }
-        }
-
-        pixelCtx.putImageData(dstData, 0, 0);
-
-        // Scale up if needed for export scale
-        let finalCanvas = pixelCanvas;
-        if (exportScale > 1) {
-            finalCanvas = document.createElement('canvas');
-            finalCanvas.width = actualWidth * exportScale;
-            finalCanvas.height = actualHeight * exportScale;
-            const finalCtx = finalCanvas.getContext('2d');
-
-            finalCtx.imageSmoothingEnabled = false;
-            finalCtx.mozImageSmoothingEnabled = false;
-            finalCtx.webkitImageSmoothingEnabled = false;
-            finalCtx.msImageSmoothingEnabled = false;
-
-            finalCtx.drawImage(pixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
-        }
-
-        // Download the image
-        finalCanvas.toBlob((blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'vector-art.jpg';
-            a.click();
-            URL.revokeObjectURL(url);
-        }, 'image/jpeg', 0.95);
+    async exportJPG(exportScale = 1) {
+        // Lazy load export module
+        const { exportJPG } = await import('../utils/export.js');
+        return exportJPG(this, exportScale);
     }
 
     showGIFDialog() {
@@ -3803,312 +3886,16 @@ export class VectorEditor {
         cancelBtn.addEventListener('click', handleCancel);
     }
 
-    exportSpritesheet(exportScale = 1, transparent = false, cols = null, rows = null) {
-        if (this.frames.length === 0) {
-            alert('No frames to export!');
-            return;
-        }
-
-        // Calculate pixel-perfect size for each frame
-        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
-        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-
-        // Calculate spritesheet dimensions
-        if (!cols) cols = Math.ceil(Math.sqrt(this.frames.length));
-        if (!rows) rows = Math.ceil(this.frames.length / cols);
-        const spritesheetWidth = actualWidth * cols * exportScale;
-        const spritesheetHeight = actualHeight * rows * exportScale;
-
-        // Create spritesheet canvas
-        const spritesheetCanvas = document.createElement('canvas');
-        spritesheetCanvas.width = spritesheetWidth;
-        spritesheetCanvas.height = spritesheetHeight;
-        const spritesheetCtx = spritesheetCanvas.getContext('2d');
-
-        // Disable image smoothing for pixel-perfect rendering
-        spritesheetCtx.imageSmoothingEnabled = false;
-        spritesheetCtx.mozImageSmoothingEnabled = false;
-        spritesheetCtx.webkitImageSmoothingEnabled = false;
-        spritesheetCtx.msImageSmoothingEnabled = false;
-
-        // Fill with transparent or background color
-        if (transparent) {
-            spritesheetCtx.clearRect(0, 0, spritesheetWidth, spritesheetHeight);
-        } else {
-            spritesheetCtx.fillStyle = this.backgroundColor;
-            spritesheetCtx.fillRect(0, 0, spritesheetWidth, spritesheetHeight);
-        }
-
-        // Render each frame to the spritesheet
-        const savedShapes = this.shapes;
-        const savedCtx = this.ctx;
-        const savedCanvas = this.canvas;
-        const savedScale = this.scale;
-
-        this.frames.forEach((frame, index) => {
-            const col = index % cols;
-            const row = Math.floor(index / cols);
-            const x = col * actualWidth * exportScale;
-            const y = row * actualHeight * exportScale;
-
-            // Create temporary canvas for this frame
-            const frameCanvas = document.createElement('canvas');
-            frameCanvas.width = this.canvas.width;
-            frameCanvas.height = this.canvas.height;
-            const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
-
-            // Render frame with background or transparent
-            if (!transparent) {
-                frameCtx.fillStyle = this.backgroundColor;
-                frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
-            }
-
-            // Temporarily switch context to render this frame
-            this.ctx = frameCtx;
-            this.canvas = frameCanvas;
-            this.shapes = frame.shapes;
-
-            frame.shapes.forEach(shape => {
-                this.drawShape(shape, false);
-            });
-
-            // Downsample frame to pixel-perfect size
-            const srcData = frameCtx.getImageData(0, 0, frameCanvas.width, frameCanvas.height);
-            const framePixelCanvas = document.createElement('canvas');
-            framePixelCanvas.width = actualWidth;
-            framePixelCanvas.height = actualHeight;
-            const framePixelCtx = framePixelCanvas.getContext('2d');
-            const dstData = framePixelCtx.createImageData(actualWidth, actualHeight);
-
-            const scaleX = frameCanvas.width / actualWidth;
-            const scaleY = frameCanvas.height / actualHeight;
-
-            for (let dy = 0; dy < actualHeight; dy++) {
-                for (let dx = 0; dx < actualWidth; dx++) {
-                    const sx = Math.floor((dx + 0.5) * scaleX);
-                    const sy = Math.floor((dy + 0.5) * scaleY);
-                    const srcIdx = (sy * frameCanvas.width + sx) * 4;
-                    const dstIdx = (dy * actualWidth + dx) * 4;
-
-                    dstData.data[dstIdx] = srcData.data[srcIdx];
-                    dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
-                    dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
-                    dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
-                }
-            }
-
-            framePixelCtx.putImageData(dstData, 0, 0);
-
-            // Scale up if needed
-            if (exportScale > 1) {
-                const scaledCanvas = document.createElement('canvas');
-                scaledCanvas.width = actualWidth * exportScale;
-                scaledCanvas.height = actualHeight * exportScale;
-                const scaledCtx = scaledCanvas.getContext('2d');
-
-                scaledCtx.imageSmoothingEnabled = false;
-                scaledCtx.mozImageSmoothingEnabled = false;
-                scaledCtx.webkitImageSmoothingEnabled = false;
-                scaledCtx.msImageSmoothingEnabled = false;
-
-                scaledCtx.drawImage(framePixelCanvas, 0, 0, actualWidth * exportScale, actualHeight * exportScale);
-
-                // Draw the scaled frame onto the spritesheet
-                spritesheetCtx.drawImage(scaledCanvas, x, y);
-            } else {
-                // Draw the frame onto the spritesheet
-                spritesheetCtx.drawImage(framePixelCanvas, x, y);
-            }
-        });
-
-        // Restore original state
-        this.shapes = savedShapes;
-        this.ctx = savedCtx;
-        this.canvas = savedCanvas;
-        this.scale = savedScale;
-
-        // Download the spritesheet
-        spritesheetCanvas.toBlob((blob) => {
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `spritesheet-${cols}x${rows}.png`;
-            a.click();
-            URL.revokeObjectURL(url);
-        }, 'image/png');
+    async exportSpritesheet(exportScale = 1, transparent = false, cols = null, rows = null) {
+        // Lazy load export module
+        const { exportSpritesheet } = await import('../utils/export.js');
+        return exportSpritesheet(this, exportScale, transparent, cols, rows);
     }
 
-    exportGIF(exportScale = 1, transparent = false) {
-        if (this.frames.length === 0) {
-            alert('No frames to export!');
-            return;
-        }
-
-        if (typeof GIF === 'undefined') {
-            alert('GIF library not loaded! Please refresh the page.');
-            console.error('GIF library (gif.js) is not loaded');
-            return;
-        }
-
-        console.log('Starting GIF export...');
-        console.log(`Frames: ${this.frames.length}, FPS: ${this.fps}, Scale: ${exportScale}, Transparent: ${transparent}`);
-
-        // Calculate pixel-perfect size
-        const actualWidth = this.gridCells > 0 ? this.gridCells : this.canvasWidth;
-        const actualHeight = this.gridCells > 0 ? this.gridCells : this.canvasHeight;
-        const finalWidth = actualWidth * exportScale;
-        const finalHeight = actualHeight * exportScale;
-
-        console.log(`GIF dimensions: ${finalWidth}x${finalHeight}`);
-
-        // Create GIF encoder
-        // Use local worker script (no CORS issues, faster than main thread)
-        const gifConfig = {
-            quality: 10,
-            width: finalWidth,
-            height: finalHeight,
-            workers: 2,
-            workerScript: './gif.worker.js'  // Local file, no CORS issues
-        };
-
-        if (transparent) {
-            gifConfig.transparent = 0x000000;  // Set black as transparent color
-        }
-
-        console.log('Using web workers for GIF encoding');
-
-        try {
-            const gif = new GIF(gifConfig);
-
-            // Add error handler
-            gif.on('error', (error) => {
-                console.error('GIF encoding error:', error);
-                alert('Error encoding GIF: ' + error.message);
-            });
-
-            // Save original state
-            const savedShapes = this.shapes;
-            const savedCtx = this.ctx;
-            const savedCanvas = this.canvas;
-            const savedScale = this.scale;
-
-            // Calculate delay per frame (in milliseconds)
-            const baseDelay = Math.round(1000 / this.fps);
-
-            console.log(`Base delay per frame: ${baseDelay}ms`);
-
-            // Add each frame to the GIF (respecting frame holds)
-            this.frames.forEach((frame, index) => {
-                console.log(`Processing frame ${index + 1}/${this.frames.length}...`);
-                // Create temporary canvas for this frame
-                const frameCanvas = document.createElement('canvas');
-                frameCanvas.width = this.canvas.width;
-                frameCanvas.height = this.canvas.height;
-                const frameCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
-
-                // Render frame with background or transparent
-                if (transparent) {
-                    // Clear to transparent, then fill with black (which will be set as transparent in GIF)
-                    frameCtx.clearRect(0, 0, frameCanvas.width, frameCanvas.height);
-                    frameCtx.fillStyle = '#000000';
-                    frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
-                } else {
-                    frameCtx.fillStyle = this.backgroundColor;
-                    frameCtx.fillRect(0, 0, frameCanvas.width, frameCanvas.height);
-                }
-
-                // Temporarily switch context to render this frame
-                this.ctx = frameCtx;
-                this.canvas = frameCanvas;
-                this.shapes = frame.shapes;
-
-                frame.shapes.forEach(shape => {
-                    this.drawShape(shape, false);
-                });
-
-                // Downsample frame to pixel-perfect size
-                const srcData = frameCtx.getImageData(0, 0, frameCanvas.width, frameCanvas.height);
-                const framePixelCanvas = document.createElement('canvas');
-                framePixelCanvas.width = actualWidth;
-                framePixelCanvas.height = actualHeight;
-                const framePixelCtx = framePixelCanvas.getContext('2d');
-                const dstData = framePixelCtx.createImageData(actualWidth, actualHeight);
-
-                const scaleX = frameCanvas.width / actualWidth;
-                const scaleY = frameCanvas.height / actualHeight;
-
-                for (let dy = 0; dy < actualHeight; dy++) {
-                    for (let dx = 0; dx < actualWidth; dx++) {
-                        const sx = Math.floor((dx + 0.5) * scaleX);
-                        const sy = Math.floor((dy + 0.5) * scaleY);
-                        const srcIdx = (sy * frameCanvas.width + sx) * 4;
-                        const dstIdx = (dy * actualWidth + dx) * 4;
-
-                        dstData.data[dstIdx] = srcData.data[srcIdx];
-                        dstData.data[dstIdx + 1] = srcData.data[srcIdx + 1];
-                        dstData.data[dstIdx + 2] = srcData.data[srcIdx + 2];
-                        dstData.data[dstIdx + 3] = srcData.data[srcIdx + 3];
-                    }
-                }
-
-                framePixelCtx.putImageData(dstData, 0, 0);
-
-                // Scale up if needed
-                let finalFrameCanvas = framePixelCanvas;
-                if (exportScale > 1) {
-                    const scaledCanvas = document.createElement('canvas');
-                    scaledCanvas.width = finalWidth;
-                    scaledCanvas.height = finalHeight;
-                    const scaledCtx = scaledCanvas.getContext('2d');
-
-                    scaledCtx.imageSmoothingEnabled = false;
-                    scaledCtx.mozImageSmoothingEnabled = false;
-                    scaledCtx.webkitImageSmoothingEnabled = false;
-                    scaledCtx.msImageSmoothingEnabled = false;
-
-                    scaledCtx.drawImage(framePixelCanvas, 0, 0, finalWidth, finalHeight);
-                    finalFrameCanvas = scaledCanvas;
-                }
-
-                // Add frame to GIF with delay based on hold value
-                const frameDelay = baseDelay * (frame.hold || 1);
-                console.log(`Adding frame ${index + 1} with delay ${frameDelay}ms (hold: ${frame.hold})`);
-                gif.addFrame(finalFrameCanvas, { delay: frameDelay, copy: true });
-            });
-
-            // Restore original state
-            this.shapes = savedShapes;
-            this.ctx = savedCtx;
-            this.canvas = savedCanvas;
-            this.scale = savedScale;
-
-            // Show progress message
-            console.log('All frames added. Starting GIF encoding...');
-
-            // Render and download the GIF
-            gif.on('finished', (blob) => {
-                console.log('GIF encoding finished!');
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'animation.gif';
-                a.click();
-                URL.revokeObjectURL(url);
-                console.log('GIF download started!');
-            });
-
-            // Add progress handler
-            gif.on('progress', (progress) => {
-                console.log(`GIF encoding progress: ${Math.round(progress * 100)}%`);
-            });
-
-            // Start rendering
-            gif.render();
-
-        } catch (error) {
-            console.error('Error creating/encoding GIF:', error);
-            alert('Failed to export GIF: ' + error.message);
-        }
+    async exportGIF(exportScale = 1, transparent = false) {
+        // Lazy load export module
+        const { exportGIF } = await import('../utils/export.js');
+        return exportGIF(this, exportScale, transparent);
     }
 
     handleKeyDown(e) {
@@ -4136,6 +3923,11 @@ export class VectorEditor {
             }
             if (e.key === 's' || e.key === 'S') {
                 this.save();
+                e.preventDefault();
+                return;
+            }
+            if (!e.shiftKey && (e.key === 'g' || e.key === 'G')) {
+                this.createGroup();
                 e.preventDefault();
                 return;
             }
@@ -4296,6 +4088,10 @@ export class VectorEditor {
             this.simplifySelectedShapes();
             e.preventDefault();
         }
+        if (e.ctrlKey && e.shiftKey && (e.key === 'G' || e.key === 'g')) {
+            this.ungroupShapes();
+            e.preventDefault();
+        }
 
         // Actions
         if (e.key === 'Escape') {
@@ -4311,8 +4107,18 @@ export class VectorEditor {
             this.render();
         }
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            this.deleteShape();
-            e.preventDefault();
+            // Don't delete if user is typing in an input field
+            const activeElement = document.activeElement;
+            const isTyping = activeElement && (
+                activeElement.tagName === 'INPUT' ||
+                activeElement.tagName === 'TEXTAREA' ||
+                activeElement.isContentEditable
+            );
+
+            if (!isTyping) {
+                this.deleteShape();
+                e.preventDefault();
+            }
         }
     }
 
@@ -4338,6 +4144,9 @@ export class VectorEditor {
 
             // Draw each shape in the frame with a red or blue tint
             frame.shapes.forEach(shape => {
+                // Skip hidden shapes
+                if (shape.hidden) return;
+
                 const tintedShape = { ...shape };
                 const originalColor = this.colors[shape.color];
 
@@ -4388,6 +4197,9 @@ export class VectorEditor {
 
             // Draw each shape in the frame with a green or blue tint
             frame.shapes.forEach(shape => {
+                // Skip hidden shapes
+                if (shape.hidden) return;
+
                 const tintedShape = { ...shape };
                 const originalColor = this.colors[shape.color];
 
@@ -4435,8 +4247,14 @@ export class VectorEditor {
             this.drawOnionSkin();
         }
 
-        // Draw all shapes
+        // Draw all shapes (skip hidden ones)
+        if (this.shapes.length > 0) {
+            console.log('Rendering', this.shapes.length, 'shapes to main canvas');
+        }
         this.shapes.forEach(shape => {
+            // Skip hidden shapes
+            if (shape.hidden) return;
+
             const isSelected = this.selectedShapes.includes(shape);
             this.drawShape(shape, isSelected);
         });
@@ -4990,52 +4808,85 @@ export class VectorEditor {
         this.fillPolygon(points, color, lineWidth, ditherPattern, invertDither);
     }
 
-    // Scanline polygon fill algorithm
+    // Optimized scanline polygon fill algorithm with edge table
     fillPolygon(points, color, lineWidth = 1, ditherPattern = undefined, invertDither = false) {
         if (points.length < 3) return;
 
-        // Find bounding box
-        let minY = Math.floor(points[0].y);
-        let maxY = Math.floor(points[0].y);
-        let minX = Math.floor(points[0].x);
-        let maxX = Math.floor(points[0].x);
+        // Build edge table - pre-process edges
+        const edges = [];
+        let minY = Infinity;
+        let maxY = -Infinity;
 
-        for (let i = 1; i < points.length; i++) {
-            minY = Math.min(minY, Math.floor(points[i].y));
-            maxY = Math.max(maxY, Math.floor(points[i].y));
-            minX = Math.min(minX, Math.floor(points[i].x));
-            maxX = Math.max(maxX, Math.floor(points[i].x));
+        for (let i = 0; i < points.length; i++) {
+            const p1 = points[i];
+            const p2 = points[(i + 1) % points.length];
+
+            const y1 = Math.floor(p1.y);
+            const y2 = Math.floor(p2.y);
+
+            // Skip horizontal edges
+            if (y1 === y2) continue;
+
+            const x1 = p1.x;
+            const x2 = p2.x;
+
+            // Ensure y1 < y2 for easier processing
+            let yMin, yMax, xStart, dx;
+            if (y1 < y2) {
+                yMin = y1;
+                yMax = y2;
+                xStart = x1;
+                dx = (x2 - x1) / (y2 - y1); // Slope (change in x per y)
+            } else {
+                yMin = y2;
+                yMax = y1;
+                xStart = x2;
+                dx = (x1 - x2) / (y1 - y2);
+            }
+
+            edges.push({
+                yMin: yMin,
+                yMax: yMax,
+                x: xStart,      // Current x intersection
+                dx: dx          // Incremental x step per scanline
+            });
+
+            minY = minY < yMin ? minY : yMin;
+            maxY = maxY > yMax ? maxY : yMax;
         }
 
-        // Scanline fill
+        if (edges.length === 0) return; // Degenerate polygon
+
+        // Process scanlines
         for (let y = minY; y <= maxY; y++) {
-            const intersections = [];
+            // Find active edges for this scanline
+            const activeX = [];
 
-            // Find intersections with polygon edges
-            for (let i = 0; i < points.length; i++) {
-                const j = (i + 1) % points.length;
-                const y1 = points[i].y;
-                const y2 = points[j].y;
-
-                if ((y1 <= y && y < y2) || (y2 <= y && y < y1)) {
-                    const x1 = points[i].x;
-                    const x2 = points[j].x;
-                    const x = x1 + (y - y1) * (x2 - x1) / (y2 - y1);
-                    intersections.push(Math.floor(x));
+            for (let i = 0; i < edges.length; i++) {
+                const edge = edges[i];
+                if (edge.yMin <= y && y < edge.yMax) {
+                    activeX.push(Math.floor(edge.x));
+                }
+                // Update x for next scanline (incremental calculation)
+                if (y >= edge.yMin) {
+                    edge.x += edge.dx;
                 }
             }
 
-            // Sort intersections
-            intersections.sort((a, b) => a - b);
+            // Sort active intersections (typically very few, so simple sort is fast)
+            activeX.sort((a, b) => a - b);
 
             // Fill between pairs
-            for (let i = 0; i < intersections.length; i += 2) {
-                if (i + 1 < intersections.length) {
+            for (let i = 0; i < activeX.length; i += 2) {
+                if (i + 1 < activeX.length) {
+                    const xStart = activeX[i];
+                    const xEnd = activeX[i + 1];
+
                     if (this.gridCells > 0) {
-                        // Fill grid cells across the scanline - optimized to fill each cell once
+                        // Grid mode: fill cells
                         const cellSize = this.getCellSize();
-                        const startCellX = Math.floor(intersections[i] / cellSize);
-                        const endCellX = Math.floor(intersections[i + 1] / cellSize);
+                        const startCellX = Math.floor(xStart / cellSize);
+                        const endCellX = Math.floor(xEnd / cellSize);
                         const cellY = Math.floor(y / cellSize);
 
                         for (let cx = startCellX; cx <= endCellX; cx++) {
@@ -5048,16 +4899,25 @@ export class VectorEditor {
                                     }
                                 }
                             } else {
-                                this.ctx.fillStyle = color;
-                                this.ctx.fillRect(cx * cellSize * this.scale, cellY * cellSize * this.scale,
-                                                cellSize * this.scale, cellSize * this.scale);
+                                // Use ImageData buffer fillRect for batch operation
+                                if (this.imageBuffer) {
+                                    this.imageBuffer.fillRect(cx * cellSize, cellY * cellSize, cellSize, cellSize, color);
+                                } else {
+                                    this.ctx.fillStyle = color;
+                                    this.ctx.fillRect(cx * cellSize * this.scale, cellY * cellSize * this.scale,
+                                                    cellSize * this.scale, cellSize * this.scale);
+                                }
                             }
                         }
                     } else {
-                        for (let x = intersections[i]; x <= intersections[i + 1]; x++) {
-                            if (ditherPattern !== undefined && ditherPattern !== null) {
+                        // Pixel mode: use buffer for scanline span
+                        if (ditherPattern !== undefined && ditherPattern !== null) {
+                            for (let x = xStart; x <= xEnd; x++) {
                                 this.applyDitherPattern(x, y, color, ditherPattern, invertDither);
-                            } else {
+                            }
+                        } else {
+                            // Fill horizontal span pixel by pixel
+                            for (let x = xStart; x <= xEnd; x++) {
                                 this.setPixel(x, y, color);
                             }
                         }
@@ -5069,6 +4929,7 @@ export class VectorEditor {
 
     // Set a single pixel on the scaled canvas
     setPixel(x, y, color) {
+        // Direct canvas drawing (ImageData buffer conflicts with direct canvas operations)
         this.ctx.fillStyle = color;
         this.ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
     }
@@ -5097,7 +4958,7 @@ export class VectorEditor {
                 }
             }
         } else {
-            // Use direct canvas fillRect for entire cell - much faster than pixel-by-pixel
+            // Direct canvas fillRect for entire cell
             this.ctx.fillStyle = color;
             this.ctx.fillRect(cellX * this.scale, cellY * this.scale, cellSize * this.scale, cellSize * this.scale);
         }
@@ -5476,199 +5337,340 @@ export class VectorEditor {
             }
         };
 
+        // Organize shapes by group
+        const groupedShapes = new Map(); // groupId -> shapes array
+        const ungroupedShapes = [];
+
         this.shapes.forEach((shape, index) => {
-            const item = document.createElement('div');
-            item.className = 'shape-order-item';
-
-            // Check if this shape is selected
-            if (this.selectedShapes.includes(shape)) {
-                item.classList.add('selected');
+            shape._index = index; // Store original index for reference
+            if (shape.groupId) {
+                if (!groupedShapes.has(shape.groupId)) {
+                    groupedShapes.set(shape.groupId, []);
+                }
+                groupedShapes.get(shape.groupId).push(shape);
+            } else {
+                ungroupedShapes.push(shape);
             }
+        });
 
-            // Create shape icon with color
-            const icon = document.createElement('div');
-            icon.className = 'shape-icon';
-            icon.style.backgroundColor = this.colors[shape.color] || '#ffffff';
+        // Render groups first, then ungrouped shapes
+        this.groups.forEach(group => {
+            const shapes = groupedShapes.get(group.id);
+            if (!shapes || shapes.length === 0) return;
 
-            // Add shape type letter to icon
-            const typeChar = {
-                'line': 'L',
-                'rect': 'R',
-                'circle': 'C',
-                'oval': 'O',
-                'triangle': 'T',
-                'polygon': 'P'
-            }[shape.type] || '?';
-            icon.textContent = typeChar;
-
-            // Determine text color for icon (black or white based on background)
-            const bgColor = this.colors[shape.color] || '#ffffff';
-            const rgb = helpers.hexToRgb(bgColor);
-            const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
-            icon.style.color = brightness > 128 ? '#000' : '#fff';
-
-            // Create editable name input
-            const nameInput = document.createElement('input');
-            nameInput.type = 'text';
-            nameInput.className = 'shape-label';
-            const outlineText = shape.outline ? ' (outline)' : '';
-            const defaultName = `${shape.type.charAt(0).toUpperCase() + shape.type.slice(1)}${outlineText}`;
-            nameInput.value = shape.name || defaultName;
-            nameInput.placeholder = defaultName;
-            nameInput.style.cssText = `
-                color: #fff;
-                font-size: 11px;
-                font-family: "Courier New", monospace;
-                background: #16213e;
+            // Create group header
+            const groupHeader = document.createElement('div');
+            groupHeader.className = 'shape-group-header';
+            groupHeader.style.cssText = `
+                display: flex;
+                align-items: center;
+                padding: 6px 8px;
+                background: #1a1a2e;
                 border: 1px solid #533483;
                 border-radius: 3px;
-                padding: 2px 4px;
-                flex: 1;
-                box-sizing: border-box;
+                margin-bottom: 4px;
+                cursor: pointer;
+                gap: 6px;
             `;
 
-            // Prevent item selection when clicking input
-            nameInput.addEventListener('click', (e) => {
-                e.stopPropagation();
-            });
+            // Collapse/expand icon
+            const collapseIcon = document.createElement('div');
+            collapseIcon.textContent = group.collapsed ? '▶' : '▼';
+            collapseIcon.style.cssText = `
+                font-size: 10px;
+                color: #94b0c2;
+            `;
 
-            // Save name on change
-            nameInput.addEventListener('change', (e) => {
-                const newName = e.target.value.trim();
-                shape.name = newName || null; // null = use default name
-                this.shapeWasModified = true;
+            // Folder icon
+            const folderIcon = document.createElement('div');
+            folderIcon.textContent = '📁';
+            folderIcon.style.fontSize = '14px';
+
+            // Group name (editable)
+            const groupNameInput = document.createElement('input');
+            groupNameInput.type = 'text';
+            groupNameInput.value = group.name;
+            groupNameInput.style.cssText = `
+                color: #e94560;
+                font-size: 11px;
+                font-family: "Courier New", monospace;
+                background: transparent;
+                border: none;
+                flex: 1;
+                padding: 0;
+            `;
+            groupNameInput.addEventListener('click', (e) => e.stopPropagation());
+            groupNameInput.addEventListener('mousedown', (e) => e.stopPropagation());
+            groupNameInput.addEventListener('change', (e) => {
+                group.name = e.target.value.trim() || `Group ${group.id}`;
                 this.saveHistory();
                 this.saveCurrentFrame();
-                this.render();
             });
 
-            // Create z-index indicator
-            const zIndex = document.createElement('div');
-            zIndex.className = 'shape-z-index';
-            zIndex.textContent = `#${index}`;
+            // Shape count
+            const shapeCount = document.createElement('div');
+            shapeCount.textContent = `(${shapes.length})`;
+            shapeCount.style.cssText = `
+                color: #888;
+                font-size: 10px;
+            `;
 
-            // Assemble item
-            item.appendChild(icon);
-            item.appendChild(nameInput);
-            item.appendChild(zIndex);
+            groupHeader.appendChild(collapseIcon);
+            groupHeader.appendChild(folderIcon);
+            groupHeader.appendChild(groupNameInput);
+            groupHeader.appendChild(shapeCount);
 
-            // Make item draggable
-            item.draggable = true;
-            item.dataset.shapeIndex = index;
-
-            // Drag start
-            item.addEventListener('dragstart', (e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', index);
-                item.classList.add('dragging');
-                this.draggedShapeIndex = index;
-            });
-
-            // Drag end
-            item.addEventListener('dragend', (e) => {
-                item.classList.remove('dragging');
-                // Clean up any drag-over classes
-                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                    el.classList.remove('drag-over-top', 'drag-over-bottom');
-                });
-                this.draggedShapeIndex = null;
-            });
-
-            // Drag over
-            item.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-
-                if (this.draggedShapeIndex === null) return;
-
-                // Remove previous drag-over classes
-                document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                    el.classList.remove('drag-over-top', 'drag-over-bottom');
-                });
-
-                // Determine if we should insert above or below
-                // Note: List is reversed (column-reverse), so top = higher index, bottom = lower index
-                const rect = item.getBoundingClientRect();
-                const midpoint = rect.top + rect.height / 2;
-                const mouseY = e.clientY;
-
-                if (mouseY < midpoint) {
-                    // Top half - visually above means higher index (towards front)
-                    item.classList.add('drag-over-top');
-                } else {
-                    // Bottom half - visually below means lower index (towards back)
-                    item.classList.add('drag-over-bottom');
-                }
-            });
-
-            // Drag leave
-            item.addEventListener('dragleave', (e) => {
-                item.classList.remove('drag-over-top', 'drag-over-bottom');
-            });
-
-            // Drop
-            item.addEventListener('drop', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (this.draggedShapeIndex === null) return;
-
-                const targetIndex = parseInt(item.dataset.shapeIndex);
-
-                // Determine insertion index
-                // List is reversed (column-reverse): top = high index (front), bottom = low index (back)
-                const rect = item.getBoundingClientRect();
-                const midpoint = rect.top + rect.height / 2;
-                const mouseY = e.clientY;
-
-                let insertIndex;
-                if (mouseY < midpoint) {
-                    // Dropping above target (visually) = insert after target (higher index)
-                    insertIndex = targetIndex + 1;
-                } else {
-                    // Dropping below target (visually) = insert at target position (same or lower index)
-                    insertIndex = targetIndex;
-                }
-
-                // Reorder the shapes
-                this.reorderShape(this.draggedShapeIndex, insertIndex);
-
-                // Clean up
-                item.classList.remove('drag-over-top', 'drag-over-bottom');
-            });
-
-            // Helper function to select shape
-            const selectShape = (e) => {
-                if (e.shiftKey) {
-                    // Toggle selection with shift
-                    const shapeIndex = this.selectedShapes.indexOf(shape);
-                    if (shapeIndex > -1) {
-                        this.selectedShapes.splice(shapeIndex, 1);
-                        if (this.selectedShape === shape) {
-                            this.selectedShape = this.selectedShapes[0] || null;
-                        }
-                    } else {
-                        this.selectedShapes.push(shape);
-                        this.selectedShape = shape;
-                    }
-                } else {
-                    // Single selection
-                    this.selectedShape = shape;
-                    this.selectedShapes = [shape];
-                }
-                this.currentTool = 'select';
-                document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
-                document.getElementById('tool-select').classList.add('active');
-                this.render();
+            // Toggle collapse on click (but not when clicking input)
+            groupHeader.addEventListener('click', (e) => {
+                // Don't toggle if clicking on the input field
+                if (e.target === groupNameInput) return;
+                group.collapsed = !group.collapsed;
                 this.updateShapeOrderPreview();
-            };
+            });
 
-            // Add click handler to icon and z-index
-            icon.addEventListener('click', selectShape);
-            zIndex.addEventListener('click', selectShape);
+            // Render shapes in group (if not collapsed) - append before header due to column-reverse
+            if (!group.collapsed) {
+                shapes.forEach(shape => {
+                    const index = shape._index;
+                    const item = this.createShapeOrderItem(shape, index, true);
+                    listElement.appendChild(item);
+                });
+            }
 
+            // Append header last so it appears above shapes (column-reverse)
+            listElement.appendChild(groupHeader);
+        });
+
+        // Render ungrouped shapes
+        ungroupedShapes.forEach(shape => {
+            const index = shape._index;
+            const item = this.createShapeOrderItem(shape, index, false);
             listElement.appendChild(item);
         });
+    }
+
+    /**
+     * Create a shape order list item
+     */
+    createShapeOrderItem(shape, index, isGrouped) {
+        const item = document.createElement('div');
+        item.className = 'shape-order-item';
+
+        // Add indentation for grouped shapes
+        if (isGrouped) {
+            item.style.marginLeft = '20px';
+        }
+
+        // Check if this shape is selected
+        if (this.selectedShapes.includes(shape)) {
+            item.classList.add('selected');
+        }
+
+        // Create shape icon with color
+        const icon = document.createElement('div');
+        icon.className = 'shape-icon';
+        icon.style.backgroundColor = this.colors[shape.color] || '#ffffff';
+
+        // Add shape type letter to icon
+        const typeChar = {
+            'line': 'L',
+            'rect': 'R',
+            'circle': 'C',
+            'oval': 'O',
+            'triangle': 'T',
+            'polygon': 'P'
+        }[shape.type] || '?';
+        icon.textContent = typeChar;
+
+        // Determine text color for icon (black or white based on background)
+        const bgColor = this.colors[shape.color] || '#ffffff';
+        const rgb = helpers.hexToRgb(bgColor);
+        const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+        icon.style.color = brightness > 128 ? '#000' : '#fff';
+
+        // Create editable name input
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'shape-label';
+        const outlineText = shape.outline ? ' (outline)' : '';
+        const defaultName = `${shape.type.charAt(0).toUpperCase() + shape.type.slice(1)}${outlineText}`;
+        nameInput.value = shape.name || defaultName;
+        nameInput.placeholder = defaultName;
+        nameInput.style.cssText = `
+            color: #fff;
+            font-size: 11px;
+            font-family: "Courier New", monospace;
+            background: #16213e;
+            border: 1px solid #533483;
+            border-radius: 3px;
+            padding: 2px 4px;
+            flex: 1;
+            box-sizing: border-box;
+        `;
+
+        // Prevent item selection when clicking input
+        nameInput.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        // Save name on change
+        nameInput.addEventListener('change', (e) => {
+            const newName = e.target.value.trim();
+            shape.name = newName || null; // null = use default name
+            this.shapeWasModified = true;
+            this.saveHistory();
+            this.saveCurrentFrame();
+            this.render();
+        });
+
+        // Create visibility toggle (eye icon)
+        const eyeIcon = document.createElement('div');
+        eyeIcon.className = 'eye-icon';
+        eyeIcon.textContent = shape.hidden ? '👁️‍🗨️' : '👁️';
+        eyeIcon.style.cssText = `
+            font-size: 16px;
+            cursor: pointer;
+            opacity: ${shape.hidden ? '0.3' : '1'};
+            transition: opacity 0.2s;
+        `;
+        eyeIcon.title = shape.hidden ? 'Show shape' : 'Hide shape';
+        eyeIcon.addEventListener('click', (e) => {
+            e.stopPropagation();
+            shape.hidden = !shape.hidden;
+            this.shapeWasModified = true;
+            this.saveHistory();
+            this.saveCurrentFrame();
+            this.render();
+            this.updateShapeOrderPreview(); // Refresh the list to update icon
+        });
+
+        // Create z-index indicator
+        const zIndex = document.createElement('div');
+        zIndex.className = 'shape-z-index';
+        zIndex.textContent = `#${index}`;
+
+        // Assemble item
+        item.appendChild(eyeIcon);
+        item.appendChild(icon);
+        item.appendChild(nameInput);
+        item.appendChild(zIndex);
+
+        // Make item draggable
+        item.draggable = true;
+        item.dataset.shapeIndex = index;
+
+        // Drag start
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', index);
+            item.classList.add('dragging');
+            this.draggedShapeIndex = index;
+        });
+
+        // Drag end
+        item.addEventListener('dragend', (e) => {
+            item.classList.remove('dragging');
+            // Clean up any drag-over classes
+            document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+            this.draggedShapeIndex = null;
+        });
+
+        // Drag over
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            if (this.draggedShapeIndex === null) return;
+
+            // Remove previous drag-over classes
+            document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+
+            // Determine if we should insert above or below
+            // Note: List is reversed (column-reverse), so top = higher index, bottom = lower index
+            const rect = item.getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+            const mouseY = e.clientY;
+
+            if (mouseY < midpoint) {
+                // Top half - visually above means higher index (towards front)
+                item.classList.add('drag-over-top');
+            } else {
+                // Bottom half - visually below means lower index (towards back)
+                item.classList.add('drag-over-bottom');
+            }
+        });
+
+        // Drag leave
+        item.addEventListener('dragleave', (e) => {
+            item.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        // Drop
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (this.draggedShapeIndex === null) return;
+
+            const targetIndex = parseInt(item.dataset.shapeIndex);
+
+            // Determine insertion index
+            // List is reversed (column-reverse): top = high index (front), bottom = low index (back)
+            const rect = item.getBoundingClientRect();
+            const midpoint = rect.top + rect.height / 2;
+            const mouseY = e.clientY;
+
+            let insertIndex;
+            if (mouseY < midpoint) {
+                // Dropping above target (visually) = insert after target (higher index)
+                insertIndex = targetIndex + 1;
+            } else {
+                // Dropping below target (visually) = insert at target position (same or lower index)
+                insertIndex = targetIndex;
+            }
+
+            // Reorder the shapes
+            this.reorderShape(this.draggedShapeIndex, insertIndex);
+
+            // Clean up
+            item.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+
+        // Helper function to select shape
+        const selectShape = (e) => {
+            if (e.shiftKey) {
+                // Toggle selection with shift
+                const shapeIndex = this.selectedShapes.indexOf(shape);
+                if (shapeIndex > -1) {
+                    this.selectedShapes.splice(shapeIndex, 1);
+                    if (this.selectedShape === shape) {
+                        this.selectedShape = this.selectedShapes[0] || null;
+                    }
+                } else {
+                    this.selectedShapes.push(shape);
+                    this.selectedShape = shape;
+                }
+            } else {
+                // Single selection
+                this.selectedShape = shape;
+                this.selectedShapes = [shape];
+            }
+            this.currentTool = 'select';
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById('tool-select').classList.add('active');
+            this.render();
+            this.updateShapeOrderPreview();
+        };
+
+        // Add click handler to icon and z-index
+        icon.addEventListener('click', selectShape);
+        zIndex.addEventListener('click', selectShape);
+
+        return item;
     }
 
     reorderShape(fromIndex, toIndex) {

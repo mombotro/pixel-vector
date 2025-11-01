@@ -27,11 +27,13 @@ function renderThumbnail(data) {
         height,
         backgroundColor,
         colors,
-        gridCells
+        gridCells,
+        canvasWidth,
+        canvasHeight
     } = data;
 
     try {
-        // Create OffscreenCanvas
+        // Create OffscreenCanvas for thumbnail (width x height, e.g. 64x64)
         const canvas = new OffscreenCanvas(width, height);
         const ctx = canvas.getContext('2d');
         ctx.imageSmoothingEnabled = false;
@@ -40,13 +42,23 @@ function renderThumbnail(data) {
         ctx.fillStyle = backgroundColor || '#0f3460';
         ctx.fillRect(0, 0, width, height);
 
-        // Calculate scale to fit thumbnail
-        const scale = 1; // Thumbnails are pre-scaled by caller
+        // Calculate scale to fit actual canvas into thumbnail
+        const scaleX = width / canvasWidth;
+        const scaleY = height / canvasHeight;
+        const scale = Math.min(scaleX, scaleY);
 
-        // Render each shape
+        // Use ctx.scale() transformation (same approach as preview)
+        ctx.save();
+        ctx.scale(scale, scale);
+
+        // Render each shape with original coordinates (context is scaled, skip hidden)
         shapes.forEach(shape => {
-            drawShape(ctx, shape, colors, scale, gridCells, width, height);
+            if (!shape.hidden) {
+                drawShape(ctx, shape, colors);
+            }
         });
+
+        ctx.restore();
 
         // Convert to ImageBitmap for efficient transfer
         canvas.convertToBlob().then(blob => {
@@ -71,9 +83,9 @@ function renderThumbnail(data) {
 }
 
 /**
- * Draw a shape on the canvas
+ * Draw a shape on the canvas (context is already scaled)
  */
-function drawShape(ctx, shape, colors, scale, gridCells, canvasWidth, canvasHeight) {
+function drawShape(ctx, shape, colors) {
     const color = colors[shape.color] || '#ffffff';
     const outline = shape.outline || false;
 
@@ -81,22 +93,22 @@ function drawShape(ctx, shape, colors, scale, gridCells, canvasWidth, canvasHeig
         case 'line':
             if (shape.points.length >= 2) {
                 for (let i = 0; i < shape.points.length - 1; i++) {
-                    drawLine(ctx, shape.points[i], shape.points[i + 1], color, scale);
+                    drawLine(ctx, shape.points[i], shape.points[i + 1], color);
                 }
             }
             break;
         case 'rect':
-            drawRect(ctx, shape.points, color, outline, scale);
+            drawRect(ctx, shape.points, color, outline);
             break;
         case 'circle':
-            drawCircle(ctx, shape.points, color, outline, scale);
+            drawCircle(ctx, shape.points, color, outline);
             break;
         case 'oval':
-            drawOval(ctx, shape.points, color, outline, scale);
+            drawOval(ctx, shape.points, color, outline);
             break;
         case 'triangle':
         case 'polygon':
-            drawPolygon(ctx, shape.points, color, outline, scale);
+            drawPolygon(ctx, shape.points, color, outline);
             break;
     }
 }
@@ -104,31 +116,31 @@ function drawShape(ctx, shape, colors, scale, gridCells, canvasWidth, canvasHeig
 /**
  * Draw a line
  */
-function drawLine(ctx, p1, p2, color, scale) {
+function drawLine(ctx, p1, p2, color) {
     ctx.strokeStyle = color;
-    ctx.lineWidth = scale;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(p1.x * scale, p1.y * scale);
-    ctx.lineTo(p2.x * scale, p2.y * scale);
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
     ctx.stroke();
 }
 
 /**
  * Draw a rectangle
  */
-function drawRect(ctx, points, color, outline, scale) {
+function drawRect(ctx, points, color, outline) {
     if (points.length < 2) return;
 
-    const x = Math.min(points[0].x, points[1].x) * scale;
-    const y = Math.min(points[0].y, points[1].y) * scale;
-    const w = Math.abs(points[1].x - points[0].x) * scale;
-    const h = Math.abs(points[1].y - points[0].y) * scale;
+    const x = Math.min(points[0].x, points[1].x);
+    const y = Math.min(points[0].y, points[1].y);
+    const w = Math.abs(points[1].x - points[0].x);
+    const h = Math.abs(points[1].y - points[0].y);
 
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
 
     if (outline) {
-        ctx.lineWidth = scale;
+        ctx.lineWidth = 1;
         ctx.strokeRect(x, y, w, h);
     } else {
         ctx.fillRect(x, y, w, h);
@@ -138,13 +150,13 @@ function drawRect(ctx, points, color, outline, scale) {
 /**
  * Draw a circle
  */
-function drawCircle(ctx, points, color, outline, scale) {
+function drawCircle(ctx, points, color, outline) {
     if (points.length < 2) return;
 
-    const cx = points[0].x * scale;
-    const cy = points[0].y * scale;
-    const dx = (points[1].x - points[0].x) * scale;
-    const dy = (points[1].y - points[0].y) * scale;
+    const cx = points[0].x;
+    const cy = points[0].y;
+    const dx = points[1].x - points[0].x;
+    const dy = points[1].y - points[0].y;
     const radius = Math.sqrt(dx * dx + dy * dy);
 
     ctx.fillStyle = color;
@@ -153,7 +165,7 @@ function drawCircle(ctx, points, color, outline, scale) {
     ctx.arc(cx, cy, radius, 0, Math.PI * 2);
 
     if (outline) {
-        ctx.lineWidth = scale;
+        ctx.lineWidth = 1;
         ctx.stroke();
     } else {
         ctx.fill();
@@ -163,13 +175,13 @@ function drawCircle(ctx, points, color, outline, scale) {
 /**
  * Draw an oval
  */
-function drawOval(ctx, points, color, outline, scale) {
+function drawOval(ctx, points, color, outline) {
     if (points.length < 2) return;
 
-    const cx = ((points[0].x + points[1].x) / 2) * scale;
-    const cy = ((points[0].y + points[1].y) / 2) * scale;
-    const rx = Math.abs(points[1].x - points[0].x) / 2 * scale;
-    const ry = Math.abs(points[1].y - points[0].y) / 2 * scale;
+    const cx = (points[0].x + points[1].x) / 2;
+    const cy = (points[0].y + points[1].y) / 2;
+    const rx = Math.abs(points[1].x - points[0].x) / 2;
+    const ry = Math.abs(points[1].y - points[0].y) / 2;
 
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
@@ -177,7 +189,7 @@ function drawOval(ctx, points, color, outline, scale) {
     ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
 
     if (outline) {
-        ctx.lineWidth = scale;
+        ctx.lineWidth = 1;
         ctx.stroke();
     } else {
         ctx.fill();
@@ -187,22 +199,22 @@ function drawOval(ctx, points, color, outline, scale) {
 /**
  * Draw a polygon
  */
-function drawPolygon(ctx, points, color, outline, scale) {
+function drawPolygon(ctx, points, color, outline) {
     if (points.length < 2) return;
 
     ctx.fillStyle = color;
     ctx.strokeStyle = color;
     ctx.beginPath();
-    ctx.moveTo(points[0].x * scale, points[0].y * scale);
+    ctx.moveTo(points[0].x, points[0].y);
 
     for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x * scale, points[i].y * scale);
+        ctx.lineTo(points[i].x, points[i].y);
     }
 
     ctx.closePath();
 
     if (outline) {
-        ctx.lineWidth = scale;
+        ctx.lineWidth = 1;
         ctx.stroke();
     } else {
         ctx.fill();

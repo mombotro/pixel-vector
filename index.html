@@ -137,6 +137,14 @@
                 </div>
 
                 <div class="tool-section">
+                    <h3>Groups</h3>
+                    <div class="tool-group">
+                        <button id="tool-create-group" title="Create Group from Selection (Ctrl+G)">Create Group</button>
+                        <button id="tool-ungroup" title="Ungroup Selected (Ctrl+Shift+G)">Ungroup</button>
+                    </div>
+                </div>
+
+                <div class="tool-section">
                     <h3>Dither</h3>
                     <div style="margin-bottom: 8px;">
                         <select id="dither-pattern-select" style="width: 100%; padding: 6px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer; margin-bottom: 8px;">
@@ -248,6 +256,13 @@
                     <!-- Color Palette -->
                     <div class="panel-box" style="flex-shrink: 0;">
                         <h3>Color Palette</h3>
+
+                        <!-- Canvas Background Color -->
+                        <div style="padding: 8px; background: #16213e; border: 1px solid #533483; border-radius: 3px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+                            <label for="background-color-picker" style="color: #94b0c2; font-size: 11px; flex: 1;">Canvas Background:</label>
+                            <input type="color" id="background-color-picker" value="#0f3460" style="width: 50px; height: 28px; cursor: pointer; border: 1px solid #533483; border-radius: 3px; background: #1a1a2e;" title="Change background color">
+                        </div>
+
                         <select id="palette-select" style="padding: 6px; background: #16213e; color: #fff; border: 1px solid #533483; border-radius: 3px; font-family: 'Courier New', monospace; cursor: pointer; margin-bottom: 8px; width: 100%;">
                             <option value="16bit" selected>16-Bit Basic</option>
                             <option value="tic80">TIC-80</option>
@@ -356,6 +371,8 @@
                 <div><kbd>Ctrl+Shift+I</kbd> Intersect</div>
                 <div><kbd>Ctrl+Shift+P</kbd> To Polygon</div>
                 <div><kbd>Ctrl+Shift+L</kbd> Simplify</div>
+                <div><kbd>Ctrl+G</kbd> Create Group</div>
+                <div><kbd>Ctrl+Shift+G</kbd> Ungroup</div>
                 <div><kbd>Ctrl+Z</kbd> Undo</div>
                 <div><kbd>Ctrl+S</kbd> Save to file</div>
                 <div><kbd>H</kbd> Lock horizontal</div>
